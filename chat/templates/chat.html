@@ -484,7 +484,7 @@
       }
 
       function sendTranlatedtextToUser() {
-        console.log("Translated XXX:", textToBeSent);
+        //console.log("Translated XXX:", textToBeSent);
         let userId = "{{ receiver.id }}"
         //const messageInput = document.getElementById("message");
         const message = textToBeSent.trim();
@@ -501,6 +501,7 @@
               messageInput.value = "";  // Clear input after sending
             });
         }
+        console.log("message XXX:", message);
       }
 
       document.body.addEventListener("click", () => {

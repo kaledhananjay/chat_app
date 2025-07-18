@@ -65,6 +65,7 @@ def chat_view(request, user_id):
 @csrf_exempt
 def loadchat(request):
     receiver_id = request.GET.get("receiver")
+    
     if not receiver_id:
         return JsonResponse({"error": "Missing receiver ID"}, status=400)
 
@@ -135,7 +136,6 @@ def get_messages(request, room_name):
 def send_message(request):
     if request.method == "POST":
         data = json.loads(request.body)
-
         sender = (
             request.user
             if request.user.is_authenticated
