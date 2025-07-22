@@ -10,9 +10,22 @@
   <script src="https://cdn.jsdelivr.net/npm/recorder-js@latest/dist/recorder.js"></script>
   <title>Chat Application</title>
   <style>
+    .navbar {
+      padding-top: 0.25rem;
+      padding-bottom: 0.25rem;
+      min-height: 40px;
+    }
+
+    .navbar-brand {
+      font-size: 1rem;
+      padding: 0.25rem 0.5rem;
+    }
+
+    .navbar .form-select,
     .navbar .btn {
-      font-size: 16px;
-      padding: 10px;
+      font-size: 0.875rem;
+      padding: 0.25rem 0.5rem;
+      height: auto;
     }
 
     .chat-box {
@@ -50,7 +63,7 @@
         <button id="startCall" class="btn btn-outline-success me-2" style="display: none;">🎤 Start Voice Call</button>
         <button id="pollForCall" style="display: none;" class="btn btn-outline-success me-2">Check Incoming
           Call</button>
-
+        <button id="stopCall" class="btn btn-outline-secondary me-2">🛑 Stop Call</button>
         <a href="{% url 'login' %}" class="btn btn-outline-danger">🚪 Logout</a>
         <div class="modal fade" id="incomingCallModal" tabindex="-1" aria-labelledby="incomingCallLabel"
           aria-hidden="true">
@@ -84,7 +97,7 @@
               {% for user in users %}
               <li class="list-group-item user-card" data-userid="{{ user.id }}">
                 <a href="{% url 'chat' user.id %}">{{ user.username }}</a>
-                <button class="btn btn-sm float-end" onclick="selectAndStartCall(this)">📞</button>
+                <button class="btn btn-sm float-end btn-light" onclick="selectAndStartCall(this)">📞</button>
               </li>
               {% empty %}
               <li class="list-group-item text-muted text-center">No users available.</li>
@@ -119,42 +132,19 @@
     </div>
   </div>
   <script>
-    // function sendMessage() {
-    //   let userId = "{{ receiver.id }}"
-    //   const messageInput = document.getElementById("message");
-    //   const message = messageInput.value.trim();
-    //   console.log('sendMessage() tiggered : ', userId)
-    //   if (message !== "") {
-    //     fetch("/api/chat/send/", {
-    //       method: "POST",
-    //       headers: { "Content-Type": "application/json" },
-    //       body: JSON.stringify({ "room_name": "{{ userId }}", "message": message })
-    //     })
-    //       .then(response => response.json())
-    //       .then(data => {
-    //         console.log(data.status);
-    //         messageInput.value = "";  // Clear input after sending
-    //       });
-    //   }
-    // }
-  </script>
-  <script>
-    //const receiver = "{{ receiver.id }}";  // Make sure this is passed from Django
-    //console.log('Before Call : ',receiver)
     function loadChatHistory() {
-      const receiver = "{{ receiver.id }}";  // Make sure this is passed from Django
+      const receiver = "{{ receiver.id }}";  
       console.log('After Call : ', receiver)
       fetch(`/chat/load/?receiver=${receiver}`, { cache: "no-store" })
         .then(response => response.json())
         .then(data => {
           const chatBox = document.getElementById("chatbox");
-          chatBox.innerHTML = "";  // Clear old messages
+          chatBox.innerHTML = "";  
 
           data.messages.forEach(msg => {
             const msgDiv = document.createElement("div");
             msgDiv.classList.add("message");
 
-            // Optional: style sent vs received
             if (msg.sender === "{{ request.user.username }}") {
               msgDiv.classList.add("sent");
             } else {
@@ -166,14 +156,13 @@
             chatBox.appendChild(msgDiv);
           });
 
-          // Auto-scroll to bottom
           chatBox.scrollTop = chatBox.scrollHeight;
         });
     }
 
     document.addEventListener("DOMContentLoaded", function () {
       loadChatHistory();
-      setInterval(loadChatHistory, 2000);  // Refresh every 2 seconds
+      setInterval(loadChatHistory, 2000);
     });
   </script>
 
@@ -188,6 +177,7 @@
       const ringtone = document.getElementById("ringtone");
       const modalElement = document.getElementById("incomingCallModal");
       const modalEl = new bootstrap.Modal(modalElement);
+      document.getElementById("stopCall").addEventListener("click", stopCall);
 
       let localStream = null;
       let latestOffer = null;
@@ -200,7 +190,6 @@
       let testStream = null;
       let textToBeSent = null;
 
-      // 🧠 CSRF helper for Django
       function getCSRFToken() {
         return document.cookie.split("; ").find(row => row.startsWith("csrftoken="))?.split("=")[1];
       }
@@ -222,7 +211,6 @@
         }
       }
 
-      // 📡 Get current user ID
       async function getCurrentUserId() {
         try {
           const response = await fetch("/api/me", { credentials: "include" });
@@ -235,7 +223,6 @@
         }
       }
 
-      // 🔧 Set up PeerConnection and media handling
       function setupPeerConnection() {
         const pc = new RTCPeerConnection({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" },
@@ -369,7 +356,6 @@
         }
       };
 
-      // 🔁 Poll for incoming calls
       setInterval(async () => {
         if (callInProgress) return;
 
@@ -404,9 +390,7 @@
       let recorder = null;
 
       async function startRecording() {
-        //console.log("In startRecording...");
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        //const mimeType = "audio/ogg;codecs=opus";
         const mimeType = [
           "audio/webm;codecs=opus",
           "audio/webm",         // fallback
@@ -419,38 +403,39 @@
         }
 
         recorder = new MediaRecorder(stream, { mimeType });
-        //console.log("After recorder...");
         recorder.ondataavailable = e => {
           if (e.data.size > 0) chunks.push(e.data);
         };
-        //console.log("After recorder.ondataavailable...");
         chunks = [];
         recorder.onstop = () => {
           const blob = new Blob(chunks, { type: mimeType });
 
           uploadAudio(blob);
         };
-        //console.log("After recorder.onstop...");
         recorder.start();
-        //console.log("Recording started...");
       }
 
       pickupBtn.onclick = async () => {
         try {
           await startRecording();
 
-          // Simulate call duration or wait for call end event
-          // Replace this with your actual "call ended" trigger
           setTimeout(() => {
             if (recorder && recorder.state === "recording") {
               recorder.stop();
               console.log("Recording stopped.");
             }
-          }, 5000); // Stop after 5 seconds for demo
+          }, 5000);
           const popupEl = document.getElementById("incomingCallModal");
-          if (popupEl) {
+          const modalInstance = bootstrap.Modal.getInstance(popupEl);
+          if (modalInstance) {
+            modalInstance.hide();
+          } else {
             popupEl.style.display = "none";
           }
+
+          const inputEl = document.getElementById("messageInput");
+          if (inputEl) inputEl.focus();
+
         } catch (err) {
           console.error("Pickup failed:", err);
         }
@@ -550,10 +535,39 @@
           console.warn("Mic track is invalid or not yet ready");
         }
       }, { once: true }); // Runs only once to avoid re-adding audio
+
+      function stopCall() {
+        console.log("Stopping call...");
+
+        if (localStream) {
+          localStream.getTracks().forEach(track => track.stop());
+          localStream = null;
+        }
+
+        if (peerConnection) {
+          peerConnection.close();
+          peerConnection = null;
+        }
+
+        if (recorder && recorder.stop) {
+          recorder.stop();
+          recorder = null;
+        }
+
+        document.getElementById("stopCall").style.display = "none";
+        document.querySelectorAll('.user-card').forEach(card =>
+          card.classList.remove('selected')
+        );
+        const ringtone = document.getElementById("ringtone");
+        if (ringtone) ringtone.pause();
+
+        const remoteAudio = document.getElementById("remoteAudio");
+        if (remoteAudio) remoteAudio.srcObject = null;
+      }
     });
 
   </script>
-    <script>
+  <script>
     function selectUser(button) {
       document.querySelectorAll('.user-card').forEach(card =>
         card.classList.remove('selected')
@@ -568,42 +582,15 @@
     }
 
     function selectAndStartCall(button) {
-      // Select the user visually
       selectUser(button);
 
-      // Programmatically trigger the navbar button click
       const startCallBtn = document.getElementById("startCall");
       if (startCallBtn) {
-        startCallBtn.click(); // simulate click on main Start Call button
+        startCallBtn.click();
       } else {
         console.warn("Start Call button not found in DOM");
       }
     }
-
-    document.addEventListener("DOMContentLoaded", () => {
-      const micTestBtn = document.createElement("button");
-      micTestBtn.textContent = "🎧 Test My Mic";
-      micTestBtn.style = "position:fixed;bottom:20px;right:20px;z-index:9999;";
-      document.body.appendChild(micTestBtn);
-
-      micTestBtn.onclick = async () => {
-        try {
-          navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-            const testAudio = document.createElement("audio");
-            testAudio.srcObject = stream;
-            testAudio.autoplay = true;
-            document.body.appendChild(testAudio);
-            testAudio.play().catch(err => {
-              console.warn("🔇 Mic loopback blocked:", err);
-            });
-          });
-
-          console.log("Loopback started — speak into your mic to test audio");
-        } catch (err) {
-          console.error("Failed to access mic:", err);
-        }
-      };
-    });
 
   </script>
 </body>
