@@ -119,30 +119,31 @@
     </div>
   </div>
   <script>
-    function sendMessage() {
-      let userId = "{{ receiver.id }}"
-      const messageInput = document.getElementById("message");
-      const message = messageInput.value.trim();
-
-      if (message !== "") {
-        fetch("/api/chat/send/", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ "room_name": "{{ userId }}", "message": message })
-        })
-          .then(response => response.json())
-          .then(data => {
-            console.log(data.status);
-            messageInput.value = "";  // Clear input after sending
-          });
-      }
-    }
+    // function sendMessage() {
+    //   let userId = "{{ receiver.id }}"
+    //   const messageInput = document.getElementById("message");
+    //   const message = messageInput.value.trim();
+    //   console.log('sendMessage() tiggered : ', userId)
+    //   if (message !== "") {
+    //     fetch("/api/chat/send/", {
+    //       method: "POST",
+    //       headers: { "Content-Type": "application/json" },
+    //       body: JSON.stringify({ "room_name": "{{ userId }}", "message": message })
+    //     })
+    //       .then(response => response.json())
+    //       .then(data => {
+    //         console.log(data.status);
+    //         messageInput.value = "";  // Clear input after sending
+    //       });
+    //   }
+    // }
   </script>
   <script>
-    const receiver = "{{ receiver.id }}";  // Make sure this is passed from Django
+    //const receiver = "{{ receiver.id }}";  // Make sure this is passed from Django
+    //console.log('Before Call : ',receiver)
     function loadChatHistory() {
       const receiver = "{{ receiver.id }}";  // Make sure this is passed from Django
-
+      console.log('After Call : ', receiver)
       fetch(`/chat/load/?receiver=${receiver}`, { cache: "no-store" })
         .then(response => response.json())
         .then(data => {
@@ -159,7 +160,6 @@
             } else {
               msgDiv.classList.add("received");
             }
-
             msgDiv.innerHTML = `
                     <strong>${msg.sender}</strong> <small>${msg.timestamp}</small> : ${msg.content}
                 `;
@@ -175,7 +175,6 @@
       loadChatHistory();
       setInterval(loadChatHistory, 2000);  // Refresh every 2 seconds
     });
-
   </script>
 
 
@@ -476,13 +475,44 @@
             const audio = new Audio(data.audio_url);
             audio.play();
             console.log("Translated YYY:", textToBeSent);
-            sendTranlatedtextToUser()
+            saveMessageAJAX()
           })
           .catch(err => console.error("Upload failed:", err));
-        // sendTranlatedtextToUser()
-        // console.log("Translated XXX:", textToBeSent);
       }
 
+      function saveMessageAJAX() {
+        const message = textToBeSent.trim();
+        const receiverId = "{{ receiver.id }}";
+
+        if (!message) return;
+
+        fetch("/api/chat/save/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]').value
+          },
+          body: JSON.stringify({
+            receiver_id: receiverId,
+            message: message
+          })
+        })
+          .then(response => response.json())
+          .then(data => {
+            if (data.status === "Message saved") {
+              console.log("Message saved:", data);
+              messageInput.value = "";
+              loadChatHistory();
+            } else {
+              console.error("Error:", data.error);
+            }
+          })
+          .catch(error => console.error("Request failed:", error));
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        document.getElementById("sendMessage").addEventListener("click", saveMessageAJAX);
+      });
       function sendTranlatedtextToUser() {
         //console.log("Translated XXX:", textToBeSent);
         let userId = "{{ receiver.id }}"
@@ -493,11 +523,11 @@
           fetch("/api/chat/send/", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ "room_name": "{{ userId }}", "message": message})
+            body: JSON.stringify({ "room_name": "{{ userId }}", "message": message })
           })
             .then(response => response.json())
             .then(data => {
-              console.log("data.status :",data.status);
+              console.log("data.status :", data.status);
               messageInput.value = "";  // Clear input after sending
             });
         }
@@ -523,7 +553,7 @@
     });
 
   </script>
-  <script>
+    <script>
     function selectUser(button) {
       document.querySelectorAll('.user-card').forEach(card =>
         card.classList.remove('selected')

@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import get_messages, send_message,chat_list_view,chat_view,loadchat,current_user_view
+from .views import get_messages, send_message,chat_list_view,chat_view,loadchat,current_user_view,save_message_view
 from . import views
 
 urlpatterns = [
@@ -17,5 +17,7 @@ urlpatterns = [
     path('api/me', current_user_view),
     #path("translate-audio/", views.translateaudio, name="translate_audio"),
     path('translate-audio/', views.translate_audio, name='translate_audio'),
+    path("api/chat/save/", save_message_view, name="save_message"),
+
 
 ]

@@ -9,23 +9,26 @@ import json
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
-from .models import CallSession
+from .models import CallSession, Chat
 from .serializers import CallOfferSerializer, CallAnswerSerializer
 from rest_framework.permissions import IsAuthenticated
 from deep_translator import GoogleTranslator
 from gtts import gTTS
 import speech_recognition as sr
 import os
-import tempfile
-from pydub import AudioSegment
-
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
+#import tempfile
+#from pydub import AudioSegment
 from django.conf import settings
 import os, uuid, subprocess
-import speech_recognition as sr
-from gtts import gTTS
-from deep_translator import GoogleTranslator
+from django.shortcuts import get_object_or_404
+#from django.http import JsonResponse
+#from django.views.decorators.csrf import csrf_exempt
+#from django.contrib.auth.decorators import login_required
+from django.utils.decorators import method_decorator
+#from django.contrib.auth.models import User
+#from .models import 
+#import json
+
 
 
 @login_required
@@ -50,6 +53,8 @@ def chat_view(request, user_id):
 
     if request.method == "POST":
         message = request.POST.get("message")
+        
+        print('I am here to save message :::: ', message)
         if message:  
             Chat.objects.create(sender=request.user, receiver=receiver, message=message)
             return redirect("chat", user_id=user_id) 
@@ -96,28 +101,16 @@ def loadchat(request):
     return JsonResponse({"messages": messages})
 
 
-# Sample code----------------
-
-from django.contrib.auth.models import User
-
-
 def chat_index(request):
     users = User.objects.exclude(
         username=request.user.username
-    )  # So you don't chat with yourself
+    ) 
     return render(request, "chat.html", {"users": users})
-
-
-from django.shortcuts import get_object_or_404
-
 
 def chat_page(request):
     receiver_username = request.GET.get("receiver")
     receiver = get_object_or_404(User, username=receiver_username)
     return render(request, "chat.html", {"receiver": receiver})
-
-
-# Sample code----------------
 
 def get_messages(request, room_name):
     messages = Message.objects.filter(room_name=room_name).order_by("timestamp")
@@ -232,7 +225,6 @@ def current_user_view(request):
         {
             "id": user.id,
             "username": user.username,
-            # add more fields if you need them
         }
     )
 
@@ -305,4 +297,35 @@ def translate_audio(request):
     return JsonResponse({"translated": translated, "audio_url": audio_url})
 
 
-# ****************************************************************************
+#@method_decorator(csrf_exempt, name='dispatch')
+@csrf_exempt
+@login_required
+def save_message_view(request):
+    if request.method == "POST":
+        try:
+            print("Raw body:", request.body)
+            data = json.loads(request.body)
+            print("Parsed data:", data)
+
+            receiver_id = data.get("receiver_id")
+            message = data.get("message")
+
+
+            if not receiver_id or not message:
+                return JsonResponse({"error": "Missing receiver or message"}, status=400)
+
+            receiver = User.objects.get(id=receiver_id)
+            chat = Chat.objects.create(sender=request.user, receiver=receiver, message=message)
+
+            return JsonResponse({
+                "status": "Message saved",
+                "message_id": chat.id,
+                "timestamp": chat.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            })
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({"error": str(e)}, status=500)
+
+
+    return JsonResponse({"error": "Invalid request method"}, status=405)
