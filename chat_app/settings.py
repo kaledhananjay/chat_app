@@ -48,18 +48,18 @@ INSTALLED_APPS = [
 
 ASGI_APPLICATION = "chat_app.asgi.application"
 
-
-# ✅ Use Redis for better WebSocket handling (Install Redis with `pip install channels-redis`)
 CHANNEL_LAYERS = {
-    # "default": {
-    #     "BACKEND": "channels_redis.core.RedisChannelLayer",
-        # "CONFIG": {
-        #     "hosts": [("127.0.0.1", 6379)],
-        # },
-            "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",  # ✅ Use Redis for production
-        },
-    },
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer"
+    }
+}
+
+# # ✅ Use Redis for better WebSocket handling (Install Redis with `pip install channels-redis`)
+# CHANNEL_LAYERS = {
+#             "default": {
+#         "BACKEND": "channels.layers.InMemoryChannelLayer",  # ✅ Use Redis for production
+#         }
+#     },
 
 
 MIDDLEWARE = [
