@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+{% load static %}
+
+<head>
+    <meta charset="UTF-8">
+    <title>Meeting Room - {{ room_name }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <style>
+        body {
+            padding: 20px;
+        }
+
+        .audio-box audio {
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        .participant-list {
+            margin-top: 20px;
+        }
+
+        .participant-list li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h3>🔊 Meeting Room: <strong>{{ room_name }}</strong></h3>
+        <p>Logged in as: <strong>{{ username }}</strong></p>
+
+        <div class="d-flex gap-2 mb-3">
+            <button id="startCallBtn" class="btn btn-success">Start Call</button>
+            <button id="leaveCallBtn" class="btn btn-danger" style="display: none;">Leave Call</button>
+            <button id="muteToggleBtn" class="btn btn-secondary" style="display: none;">Mute</button>
+        </div>
+
+        <h5>👥 Participants</h5>
+        <ul id="participantList" class="participant-list list-group"></ul>
+
+        <div class="audio-box" id="audioContainer">
+            <!-- Remote audio streams will appear here -->
+        </div>
+    </div>
+
+    <input type="hidden" id="roomName" value="{{ room_name }}">
+    <input type="hidden" id="username" value="{{ username }}">
+
+    <script>
+        const roomName = document.getElementById("roomName").value;
+        const username = document.getElementById("username").value;
+        const socket = new WebSocket(`ws://${window.location.host}/ws/meeting/${roomName}/`);
+
+        const peers = {};
+        let localStream = null;
+        let isMuted = false;
+        const participants = new Set();
+
+        document.getElementById("startCallBtn").addEventListener("click", async () => {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+            document.getElementById("startCallBtn").style.display = "none";
+            document.getElementById("leaveCallBtn").style.display = "inline-block";
+            document.getElementById("muteToggleBtn").style.display = "inline-block";
+
+            socket.send(JSON.stringify({ type: "ready", sender: username }));
+            addParticipant(username);
+        });
+
+        document.getElementById("leaveCallBtn").addEventListener("click", () => {
+            Object.values(peers).forEach(peer => peer.close());
+            for (const userId in peers) {
+                const audio = document.getElementById(`audio-${userId}`);
+                if (audio) audio.remove();
+                removeParticipant(userId);
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            document.getElementById("startCallBtn").style.display = "inline-block";
+            document.getElementById("leaveCallBtn").style.display = "none";
+            document.getElementById("muteToggleBtn").style.display = "none";
+            removeParticipant(username);
+        });
+
+        document.getElementById("muteToggleBtn").addEventListener("click", () => {
+            // if (!localStream) return;
+            // localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
+            // isMuted = !isMuted;
+            // document.getElementById("muteToggleBtn").textContent = isMuted ? "Unmute" : "Mute";
+            if (!localStream) return;
+            localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
+            isMuted = !isMuted;
+
+            document.getElementById("muteToggleBtn").textContent = isMuted ? "Unmute" : "Mute";
+
+            // Update mic icon
+            const micIcon = document.querySelector(`#participant-${username} .mic-status`);
+            if (micIcon) {
+                micIcon.innerHTML = isMuted ? "🔇" : "🎙️";
+            }
+        });
+
+        socket.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
+            const sender = data.sender;
+            const target = data.target;
+
+            if (sender === username) return;
+
+            addParticipant(sender);
+
+            if (data.type === "ready") {
+                const peer = createPeer(sender);
+                const offer = await peer.createOffer();
+                await peer.setLocalDescription(offer);
+                socket.send(JSON.stringify({ type: "offer", offer: peer.localDescription, sender: username, target: sender }));
+            }
+
+            if (data.type === "offer" && target === username) {
+                const peer = createPeer(sender);
+                await peer.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await peer.createAnswer();
+                await peer.setLocalDescription(answer);
+                socket.send(JSON.stringify({ type: "answer", answer: peer.localDescription, sender: username, target: sender }));
+            }
+
+            if (data.type === "answer" && target === username) {
+                const peer = peers[sender];
+                await peer.setRemoteDescription(new RTCSessionDescription(data.answer));
+            }
+
+            if (data.type === "candidate" && target === username) {
+                const peer = peers[sender];
+                if (peer) {
+                    await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
+                }
+            }
+        };
+
+        function monitorMicActivity(stream, userId) {
+            const audioCtx = new AudioContext();
+            const analyser = audioCtx.createAnalyser();
+            const source = audioCtx.createMediaStreamSource(stream);
+            source.connect(analyser);
+
+            const data = new Uint8Array(analyser.frequencyBinCount);
+
+            setInterval(() => {
+                analyser.getByteFrequencyData(data);
+                const volume = data.reduce((a, b) => a + b) / data.length;
+
+                const micIcon = document.querySelector(`#participant-${userId} .mic-status`);
+                if (micIcon) {
+                    micIcon.innerHTML = volume > 10 ? "🔊" : "🔇";
+                }
+            }, 500);
+        }
+
+        function createPeer(targetUser) {
+            const peer = new RTCPeerConnection();
+            peers[targetUser] = peer;
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+            }
+
+            peer.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.send(JSON.stringify({
+                        type: "candidate",
+                        candidate: event.candidate,
+                        sender: username,
+                        target: targetUser
+                    }));
+                }
+            };
+
+            peer.ontrack = (event) => {
+                const remoteStream = event.streams[0];
+                attachRemoteAudio(targetUser, remoteStream);
+            };
+
+            return peer;
+        }
+
+        function attachRemoteAudio(userId, stream) {
+            let audio = document.getElementById(`audio-${userId}`);
+            if (!audio) {
+                audio = document.createElement("audio");
+                audio.id = `audio-${userId}`;
+                audio.autoplay = true;
+                document.getElementById("audioContainer").appendChild(audio);
+            }
+            audio.srcObject = stream;
+            monitorMicActivity(stream, userId);
+        }
+
+        function addParticipant(name) {
+            //   if (participants.has(name)) return;
+            //   participants.add(name);
+            //   const li = document.createElement("li");
+            //   li.className = "list-group-item";
+            //   li.id = `participant-${name}`;
+            //   li.textContent = name;
+            //   document.getElementById("participantList").appendChild(li);
+            if (participants.has(name)) return;
+            participants.add(name);
+
+            const li = document.createElement("li");
+            li.className = "list-group-item d-flex justify-content-between align-items-center";
+            li.id = `participant-${name}`;
+
+            const label = document.createElement("span");
+            label.textContent = name;
+
+            const micIcon = document.createElement("span");
+            micIcon.className = "mic-status";
+            micIcon.innerHTML = name === username ? "🎙️" : "🔊";  // Default mic status
+
+            li.appendChild(label);
+            li.appendChild(micIcon);
+            document.getElementById("participantList").appendChild(li);
+
+        }
+
+        function removeParticipant(name) {
+            participants.delete(name);
+            const li = document.getElementById(`participant-${name}`);
+            if (li) li.remove();
+        }
+    </script>
+</body>
+
+</html>

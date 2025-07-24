@@ -43,6 +43,12 @@
     #remoteAudio {
       display: none;
     }
+
+    #inviteBox .alert {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
   </style>
 </head>
 
@@ -63,6 +69,7 @@
         <button id="startCall" class="btn btn-outline-success me-2" style="display: none;">🎤 Start Voice Call</button>
         <button id="pollForCall" style="display: none;" class="btn btn-outline-success me-2">Check Incoming
           Call</button>
+        <button id="startMeetingBtn" class="btn btn-outline-primary me-2">📞 Start Group Call</button>
         <button id="stopCall" class="btn btn-outline-secondary me-2">🛑 Stop Call</button>
         <a href="{% url 'login' %}" class="btn btn-outline-danger">🚪 Logout</a>
         <div class="modal fade" id="incomingCallModal" tabindex="-1" aria-labelledby="incomingCallLabel"
@@ -129,17 +136,18 @@
           </div>
         </div>
       </div>
+      <div id="inviteBox" class="mt-3"></div>
     </div>
   </div>
   <script>
     function loadChatHistory() {
-      const receiver = "{{ receiver.id }}";  
+      const receiver = "{{ receiver.id }}";
       console.log('After Call : ', receiver)
       fetch(`/chat/load/?receiver=${receiver}`, { cache: "no-store" })
         .then(response => response.json())
         .then(data => {
           const chatBox = document.getElementById("chatbox");
-          chatBox.innerHTML = "";  
+          chatBox.innerHTML = "";
 
           data.messages.forEach(msg => {
             const msgDiv = document.createElement("div");
@@ -591,6 +599,41 @@
         console.warn("Start Call button not found in DOM");
       }
     }
+
+    document.getElementById("startMeetingBtn").addEventListener("click", () => {
+      const roomName = `room_${Date.now()}`;
+      const receiverId = "{{ receiver.id }}";
+
+      fetch("/api/send-meeting-invite/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room: roomName, target: receiverId })
+      }).then(() => {
+        window.location.href = `/meeting/${roomName}/`;
+      });
+    });
+    // document.getElementById("startMeetingBtn").addEventListener("click", () => {
+    //   // You can generate a room name based on timestamp or user ID
+    //   const roomName = `room_${Date.now()}`;  // Or use a UUID or group ID
+    //   const receiverId = "{{ receiver.id }}";  // From Django context
+    //   const senderName = "{{ request.user.username }}";
+
+    //   const chatSocket = new WebSocket(
+    //     `ws://${window.location.host}/ws/chat/${receiverId}/`
+    //   );
+    //   // Send invite via WebSocket
+    //   chatSocket.onopen = () => {
+    //     chatSocket.send(JSON.stringify({
+    //       type: "meeting_invite",
+    //       room: roomName,
+    //       sender: senderName,
+    //       target: receiverId
+    //     }));
+
+    //     // Redirect initiator to meeting room
+    //     window.location.href = `/meeting/${roomName}/`;
+    //   };
+    // });
 
   </script>
 </body>

@@ -15,9 +15,11 @@ urlpatterns = [
     path('api/call/response', views.get_answer),
     path('api/test-post', views.test_post),
     path('api/me', current_user_view),
-    #path("translate-audio/", views.translateaudio, name="translate_audio"),
     path('translate-audio/', views.translate_audio, name='translate_audio'),
     path("api/chat/save/", save_message_view, name="save_message"),
+    path("meeting/<str:room_name>/", views.meeting_room, name="meeting_room"),
+    path("api/send-meeting-invite/", views.send_meeting_invite, name="send_meeting_invite"),
+
 
 
 ]

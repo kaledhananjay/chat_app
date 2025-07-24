@@ -326,6 +326,26 @@ def save_message_view(request):
             import traceback
             traceback.print_exc()
             return JsonResponse({"error": str(e)}, status=500)
-
-
     return JsonResponse({"error": "Invalid request method"}, status=405)
+
+@login_required
+def meeting_room(request, room_name):
+    return render(request, "meeting.html", {"room_name": room_name, "username": request.user.username})
+
+@csrf_exempt
+@login_required
+def send_meeting_invite(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            room = data.get("room")
+            target_id = data.get("target")
+            sender = request.user.username
+
+            # You can log, store, or broadcast the invite here
+            print(f"📨 Meeting invite from {sender} to user {target_id} for room {room}")
+
+            # Optionally save to DB or notify via polling
+            return JsonResponse({"status": "invite sent", "room": room})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)

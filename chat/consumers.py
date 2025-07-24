@@ -1,64 +1,37 @@
-# import json
-# from channels.generic.websocket import AsyncWebsocketConsumer
-# import logging
-# logger = logging.getLogger(__name__)
+from channels.generic.websocket import AsyncWebsocketConsumer
+import json
 
-# class ChatConsumer(AsyncWebsocketConsumer):
-#     async def connect(self):
-#         kwargs = self.scope.get("url_route", {}).get("kwargs", {})
+class MeetingConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.room_name = self.scope["url_route"]["kwargs"]["room_name"]
+        self.room_group_name = f"meeting_{self.room_name}"
 
-#         if not isinstance(kwargs, dict):
-#             print("❌ ERROR: Expected kwargs to be dict, found:", type(kwargs))
-#             await self.close()
-#             return
+        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        #await self.channel_layer.group_add(f"user_{self.scope['user'].id}", self.channel_name)
+        await self.accept()
 
-#         user_id = kwargs.get("user_id")
-#         if not user_id:
-#             print("❌ ERROR: user_id missing")
-#             await self.close()
-#             return
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
-#         self.room_name = f"chat_{user_id}"
-#         self.room_group_name = f"group_{self.room_name}"
-
-#         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-#         await self.accept()
-
-
-#         #self.user_id = self.scope["url_route"]["kwargs"].get("user_id")
-
-#         # print("DEBUG: self.scope['url_route']['kwargs'] =", self.scope['url_route']['kwargs'])  
-#         # print("DEBUG: Type of kwargs =", type(self.scope['url_route']['kwargs']))  
-#         # if not self.user_id:
-#         #     await self.close()
-#         #     return
+    async def receive(self, text_data):
+        await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "signal_message",
+                    "message": text_data
+                }
+            )
         
-#         #self.room_name = f"chat_{self.user_id}"
-#         # self.room_name = f"chat_{self.scope['url_route']['kwargs'][0]}"  # ✅ Use numeric index instead of key
-#         # self.room_group_name = f"group_{self.room_name}"
+    async def signal_message(self, event):
+        await self.send(text_data=event["message"])
 
-#         # await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-#         # await self.accept()  # ✅ Accept WebSocket connection
+        
+    async def send_meeting_invite(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "meeting_invite",
+            "room": event["room"],
+            "sender": event["sender"]
+    }))
 
-#         # Notify others that user joined
-#         # await self.channel_layer.group_send(
-#         #     self.room_group_name,
-#         #     {"type": "chat_message", "message": f"User {self.user_id} joined the chat"}
-#         # )
-
-#     async def disconnect(self, close_code):
-#         print("disconnect--------------------------------------------------------------------------------------------")
-#         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
-
-#     async def receive(self, text_data):
-#         print("receive--------------------------------------------------------------------------------------------")
-#         data = json.loads(text_data)
-#         message = data.get("message", "")
-
-#         await self.channel_layer.group_send(
-#             self.room_group_name,
-#             {"type": "chat_message", "message": message}
-#         )
-
-#     async def chat_message(self, event):
-#         await self.send(text_data=json.dumps(event))  # ✅ Sends message to the client
+    async def signal_message(self, event):
+        await self.send(text_data=event["message"])
