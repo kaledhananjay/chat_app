@@ -1,7 +1,6 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from .models import Chat
 from chat.models import Message
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
@@ -9,27 +8,18 @@ import json
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
-from .models import CallSession, Chat
+from .models import CallSession, Chat, MeetingInvite
 from .serializers import CallOfferSerializer, CallAnswerSerializer
 from rest_framework.permissions import IsAuthenticated
 from deep_translator import GoogleTranslator
 from gtts import gTTS
 import speech_recognition as sr
 import os
-#import tempfile
-#from pydub import AudioSegment
 from django.conf import settings
 import os, uuid, subprocess
 from django.shortcuts import get_object_or_404
-#from django.http import JsonResponse
-#from django.views.decorators.csrf import csrf_exempt
-#from django.contrib.auth.decorators import login_required
 from django.utils.decorators import method_decorator
-#from django.contrib.auth.models import User
-#from .models import 
-#import json
-
-
+from django.contrib.auth import get_user_model
 
 @login_required
 def chat_list_view(request):
@@ -233,18 +223,15 @@ def translate_audio(request):
     if request.method != "POST" or "audio" not in request.FILES:
         return JsonResponse({"error": "Invalid request"}, status=400)
 
-    #Step 1: Save incoming .webm blob
     audio_file = request.FILES["audio"]
     base_filename = str(uuid.uuid4())
     ogg_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.ogg")
     wav_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.wav")
 
-    #Save OGG file
     with open(ogg_path, "wb") as f:
         for chunk in audio_file.chunks():
             f.write(chunk)
 
-    #Step 2: Convert WebM → WAV via FFmpeg
     ffmpeg_cmd = [
         "ffmpeg", "-y",
         "-i", ogg_path,
@@ -264,7 +251,6 @@ def translate_audio(request):
                 status=500,
        )
 
-    #Step 3: Transcribe speech with Google STT
     recognizer = sr.Recognizer()
     try:
         with sr.AudioFile(wav_path) as source:
@@ -275,14 +261,11 @@ def translate_audio(request):
     except sr.RequestError as e:
         return JsonResponse({"error": f"STT service issue: {e}"}, status=503)
 
-    # Step 4: Translate text to Japanese
     try:
         translated = GoogleTranslator(source="auto", target="ja").translate(text)
     except Exception as e:
         return JsonResponse({"error": f"Translation failed: {e}"}, status=500)
-        
        
-    # Step 5: Generate Japanese TTS
     try:
         mp3_path = wav_path.replace(".wav", "_ja.mp3")
         print("🔉Japanese TTS : ", mp3_path)
@@ -292,12 +275,9 @@ def translate_audio(request):
     except Exception as e:
         return JsonResponse({"error": f"TTS failed: {e}"}, status=500)
 
-    # Step 6: Return audio URL
     audio_url = f"/media/{os.path.basename(mp3_path)}"
     return JsonResponse({"translated": translated, "audio_url": audio_url})
 
-
-#@method_decorator(csrf_exempt, name='dispatch')
 @csrf_exempt
 @login_required
 def save_message_view(request):
@@ -309,7 +289,6 @@ def save_message_view(request):
 
             receiver_id = data.get("receiver_id")
             message = data.get("message")
-
 
             if not receiver_id or not message:
                 return JsonResponse({"error": "Missing receiver or message"}, status=400)
@@ -329,10 +308,14 @@ def save_message_view(request):
     return JsonResponse({"error": "Invalid request method"}, status=405)
 
 @login_required
-def meeting_room(request, room_name):
-    return render(request, "meeting.html", {"room_name": room_name, "username": request.user.username})
+def meeting_room(request, room_name, user_id):
+    invited_user = get_object_or_404(User, id=user_id)
+    return render(request, "meeting.html", {
+        "room_name": room_name,
+        "username": invited_user.username 
+    })
 
-@csrf_exempt
+@csrf_exempt  # Optional: remove if using CSRF tokens
 @login_required
 def send_meeting_invite(request):
     if request.method == "POST":
@@ -340,12 +323,77 @@ def send_meeting_invite(request):
             data = json.loads(request.body)
             room = data.get("room")
             target_id = data.get("target")
-            sender = request.user.username
+            sender = request.user
 
-            # You can log, store, or broadcast the invite here
-            print(f"📨 Meeting invite from {sender} to user {target_id} for room {room}")
+            if not room or not target_id:
+                return JsonResponse({"error": "Missing room or target"}, status=400)
 
-            # Optionally save to DB or notify via polling
+            User = get_user_model()
+            try:
+                target_user = User.objects.get(id=target_id)
+            except User.DoesNotExist:
+                return JsonResponse({"error": "Target user not found"}, status=404)
+
+            # ✅ Save invite to DB
+            MeetingInvite.objects.create(sender=sender, target=target_user, room=room)
+
+            print(f"📨 Meeting invite from {sender.username} to {target_user.username} for room {room}")
+
             return JsonResponse({"status": "invite sent", "room": room})
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=400)
+
+
+
+
+        
+@login_required
+def meeting_room_group(request, room_name):
+    print("🔥 meeting_room_group triggered")
+    all_users = User.objects.exclude(id=request.user.id)
+    print("✅ all_users:", list(all_users))
+    return render(request, "meeting.html", {
+        "room_name": room_name,
+        "username": request.user.username,
+        "user_id": request.user.id,
+        "all_users": all_users,
+        "target_user": None,
+    })
+
+@login_required
+def meeting_room_direct(request, room_name, target_id):
+    print("🔥 meeting_room_direct triggered")
+    all_users = User.objects.exclude(id=request.user.id)
+    target_user = get_object_or_404(User, id=target_id)
+    return render(request, "meeting.html", {
+        "room_name": room_name,
+        "username": request.user.username,
+        "user_id": request.user.id,
+        "target_user": target_user,
+        "all_users": all_users,
+    })
+
+async def receive(self, text_data):
+    data = json.loads(text_data)
+
+    if data["type"] == "join":
+        await self.channel_layer.group_add(
+            self.room_group_name,
+            self.channel_name
+        )
+
+        # Optionally store user info in memory or DB
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "user_joined",
+                "username": data["user_id"] 
+            }
+        )
+        
+async def user_joined(self, event):
+    await self.send(text_data=json.dumps({
+        "type": "user_joined",
+        "username": event["username"]
+    }))        

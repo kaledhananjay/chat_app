@@ -197,7 +197,7 @@
       let tracks = null;
       let testStream = null;
       let textToBeSent = null;
-
+      let receiver = "{{ receiver.id }}";
       function getCSRFToken() {
         return document.cookie.split("; ").find(row => row.startsWith("csrftoken="))?.split("=")[1];
       }

@@ -1,25 +1,36 @@
 from django.urls import path
-from .views import get_messages, send_message,chat_list_view,chat_view,loadchat,current_user_view,save_message_view
-from . import views
+from .views import (
+    get_messages, send_message, chat_list_view, chat_view, loadchat,
+    current_user_view, save_message_view,
+    meeting_room_group, meeting_room_direct,
+    start_call, get_offer, send_answer, get_answer,
+    test_post, translate_audio,send_meeting_invite
+)
 
 urlpatterns = [
+    # Chat APIs
     path('api/chat/messages/<str:room_name>/', get_messages, name='get_messages'),
     path('api/chat/send/', send_message, name='send_message'),
-    path("chat/", chat_list_view, name="chat_list"),  # Shows all users
-    path("chat/<int:user_id>/", chat_view, name="chat"),  # Requires user_ids
-    path("api/chat/send/", send_message, name="send_message"),
+    path("chat/", chat_list_view, name="chat_list"),
+    path("chat/<int:user_id>/", chat_view, name="chat"),
     path("chat/load/", loadchat, name="chat_view"),
-    path('api/call/start', views.start_call),
-    path('api/call/offer', views.get_offer),
-    path('api/call/answer', views.send_answer),
-    path('api/call/response', views.get_answer),
-    path('api/test-post', views.test_post),
-    path('api/me', current_user_view),
-    path('translate-audio/', views.translate_audio, name='translate_audio'),
     path("api/chat/save/", save_message_view, name="save_message"),
-    path("meeting/<str:room_name>/", views.meeting_room, name="meeting_room"),
-    path("api/send-meeting-invite/", views.send_meeting_invite, name="send_meeting_invite"),
 
+    # User & Audio APIs
+    path('api/me', current_user_view),
+    path('translate-audio/', translate_audio, name='translate_audio'),
 
+    # Call APIs
+    path('api/call/start', start_call),
+    path('api/call/offer', get_offer),
+    path('api/call/answer', send_answer),
+    path('api/call/response', get_answer),
 
+    # Misc
+    path('api/test-post', test_post),
+
+    # ✅ Correct Meeting Views
+    path("meeting/<str:room_name>/", meeting_room_group, name="meeting_group"),
+    path("meeting/<str:room_name>/<int:target_id>/", meeting_room_direct, name="meeting_direct"),
+    path("api/send-meeting-invite/", send_meeting_invite, name="send_meeting_invite"),
 ]

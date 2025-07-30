@@ -29,3 +29,12 @@ class CallSession(models.Model):
     is_active = models.BooleanField(default=True)
     notified = models.BooleanField(default=False)
 
+class MeetingInvite(models.Model):
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_invites")
+    target = models.ForeignKey(User, on_delete=models.CASCADE, related_name="received_invites")
+    room = models.CharField(max_length=255)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.sender} invited {self.target} to {self.room}"
+

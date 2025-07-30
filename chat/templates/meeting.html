@@ -24,123 +24,301 @@
         .participant-list li {
             margin-bottom: 5px;
         }
+
+        #videoContainer {
+            height: 300px;
+            background-color: #f8f9fa;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #chatMessages {
+            height: 300px;
+            overflow-y: auto;
+            background-color: #f1f1f1;
+            padding: 10px;
+            border-radius: 5px;
+        }
     </style>
 </head>
 
 <body>
-    <div class="container">
-        <h3>🔊 Meeting Room: <strong>{{ room_name }}</strong></h3>
-        <p>Logged in as: <strong>{{ username }}</strong></p>
-
-        <div class="d-flex gap-2 mb-3">
-            <button id="startCallBtn" class="btn btn-success">Start Call</button>
-            <button id="leaveCallBtn" class="btn btn-danger" style="display: none;">Leave Call</button>
-            <button id="muteToggleBtn" class="btn btn-secondary" style="display: none;">Mute</button>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand">🔗 Meeting Room: {{ room_name }}</span>
+            <div class="collapse navbar-collapse justify-content-end">
+                <span class="navbar-text me-3 text-light">👤 {{ username }}</span>
+                <button id="startCallBtn" class="btn btn-success me-2">Start Call</button>
+                <button id="endCallBtn" class="btn btn-danger me-2">End Call</button>
+                <button id="muteBtn" class="btn btn-secondary me-2">Mute</button>
+                <button id="leaveBtn" class="btn btn-outline-light">Leave</button>
+            </div>
         </div>
+    </nav>
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <!-- 👥 User List -->
+            <div class="col-md-3 border-end">
+                <h5>👥 Participants</h5>
+                <ul id="userList" class="list-group">
+                    {% for user in all_users %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center"
+                        data-user-id="{{ user.id }}" data-username="{{ user.username }}">
+                        {{ user.username }}
+                        <!-- <button class="btn btn-sm btn-outline-primary"
+                            onclick="inviteUser(event,'{{ user.id }}')">Invite</button> -->
+                        <button class="btn btn-sm btn-outline-primary invite-btn" id="invite-button">Invite</button>
+                    </li>
+                    {% empty %}
+                    <li class="list-group-item text-muted">No users available to invite</li>
+                    {% endfor %}
+                </ul>
+                <h6>✅ In Meeting</h6>
+                <ul id="participants" class="list-group">
+                    <!-- Joined users will appear here -->
+                </ul>
+            </div>
+            <!-- <div class="participant-list mt-4">
+                <h6>✅ In Meeting</h6>
+                <ul id="participants" class="list-group">
+                </ul>
+            </div> -->
+            <!-- 💬 Chat Box -->
+            <div class="col-md-9 border-start">
+                <h5>💬 Chat</h5>
+                <div id="chatMessages" class="mb-2"
+                    style="height: 70vh; overflow-y: auto; background-color: #f1f1f1; padding: 10px; border-radius: 5px;">
+                </div>
+                <div class="input-group">
+                    <input type="text" id="chatInput" class="form-control" placeholder="Type a message...">
+                    <button class="btn btn-primary" onclick="sendChatMessage()">Send</button>
+                </div>
+            </div>
 
-        <h5>👥 Participants</h5>
-        <ul id="participantList" class="participant-list list-group"></ul>
-
-        <div class="audio-box" id="audioContainer">
-            <!-- Remote audio streams will appear here -->
         </div>
     </div>
-
-    <input type="hidden" id="roomName" value="{{ room_name }}">
+    <!-- <input type="hidden" id="roomName" value="{{ room_name }}"> -->
     <input type="hidden" id="username" value="{{ username }}">
-
+    <div id="meeting-container" data-room-name="{{ room_name }}" data-user-id="{{ username }}"></div>
     <script>
-        const roomName = document.getElementById("roomName").value;
-        const username = document.getElementById("username").value;
-        const socket = new WebSocket(`ws://${window.location.host}/ws/meeting/${roomName}/`);
+        let roomNameN = null
+        document.addEventListener("DOMContentLoaded", () => {
+            let leaveBtn = null;
+            let startCallBtn = null;
+            let leaveCallBtn = document.getElementById("leaveCallBtn");
+            let muteToggleBtn = document.getElementById("muteToggleBtn");
 
-        const peers = {};
-        let localStream = null;
-        let isMuted = false;
-        const participants = new Set();
-
-        document.getElementById("startCallBtn").addEventListener("click", async () => {
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-            document.getElementById("startCallBtn").style.display = "none";
-            document.getElementById("leaveCallBtn").style.display = "inline-block";
-            document.getElementById("muteToggleBtn").style.display = "inline-block";
-
-            socket.send(JSON.stringify({ type: "ready", sender: username }));
-            addParticipant(username);
-        });
-
-        document.getElementById("leaveCallBtn").addEventListener("click", () => {
-            Object.values(peers).forEach(peer => peer.close());
-            for (const userId in peers) {
-                const audio = document.getElementById(`audio-${userId}`);
-                if (audio) audio.remove();
-                removeParticipant(userId);
-            }
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-                localStream = null;
-            }
-            document.getElementById("startCallBtn").style.display = "inline-block";
-            document.getElementById("leaveCallBtn").style.display = "none";
-            document.getElementById("muteToggleBtn").style.display = "none";
-            removeParticipant(username);
-        });
-
-        document.getElementById("muteToggleBtn").addEventListener("click", () => {
-            // if (!localStream) return;
-            // localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
-            // isMuted = !isMuted;
-            // document.getElementById("muteToggleBtn").textContent = isMuted ? "Unmute" : "Mute";
-            if (!localStream) return;
-            localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
-            isMuted = !isMuted;
-
-            document.getElementById("muteToggleBtn").textContent = isMuted ? "Unmute" : "Mute";
-
-            // Update mic icon
-            const micIcon = document.querySelector(`#participant-${username} .mic-status`);
-            if (micIcon) {
-                micIcon.innerHTML = isMuted ? "🔇" : "🎙️";
-            }
-        });
-
-        socket.onmessage = async (event) => {
-            const data = JSON.parse(event.data);
-            const sender = data.sender;
-            const target = data.target;
-
-            if (sender === username) return;
-
-            addParticipant(sender);
-
-            if (data.type === "ready") {
-                const peer = createPeer(sender);
-                const offer = await peer.createOffer();
-                await peer.setLocalDescription(offer);
-                socket.send(JSON.stringify({ type: "offer", offer: peer.localDescription, sender: username, target: sender }));
+            console.log("✅ DOM fully loaded");
+            leaveBtn = document.getElementById("leaveBtn");
+            if (leaveBtn) {
+                leaveBtn.addEventListener("click", () => {
+                    const targetUserId = "{{ target_user_id }}";
+                    window.location.href = `/chat/${targetUserId}/`;
+                });
+            } else {
+                console.warn("⚠️ leaveBtn not found in DOM");
             }
 
-            if (data.type === "offer" && target === username) {
-                const peer = createPeer(sender);
-                await peer.setRemoteDescription(new RTCSessionDescription(data.offer));
-                const answer = await peer.createAnswer();
-                await peer.setLocalDescription(answer);
-                socket.send(JSON.stringify({ type: "answer", answer: peer.localDescription, sender: username, target: sender }));
+            const username = document.getElementById("username").value;
+            const roomName = document.getElementById("meeting-container").dataset.roomName;
+            const socket = new WebSocket(`ws://${window.location.host}/ws/meeting/${roomName}/`);
+            roomNameN = roomName
+            const peers = {};
+            let localStream = null;
+            let isMuted = false;
+            const participants = new Set();
+            const userId = window.location.pathname.split("/")[3];   // "2"
+
+            socket.onopen = () => {
+                console.log("✅ WebSocket connected");
+
+                const roomName = document.getElementById("meeting-container").dataset.roomName;
+                const username = document.getElementById("meeting-container").dataset.username;
+
+
+                // Send join event
+                socket.send(JSON.stringify({
+                    type: "join",
+                    user_id: username,
+                    room: roomName
+                }));
+            };
+
+            // socket.onopen = () => {
+            //     console.log("✅ WebSocket connected");
+            // };
+
+            document.getElementById("startCallBtn").addEventListener("click", async () => {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                document.getElementById("startCallBtn").style.display = "none";
+                leaveCallBtn.style.display = "inline-block";
+                muteToggleBtnstyle.display = "inline-block";
+
+                socket.send(JSON.stringify({ type: "ready", sender: username }));
+                addParticipant(username);
+            });
+
+
+            //const leaveBtn = document.getElementById("leaveBtn");
+            //document.getElementById("leaveCallBtn").addEventListener("click", () => {
+            if (leaveCallBtn) {
+                Object.values(peers).forEach(peer => peer.close());
+                for (const userId in peers) {
+                    const audio = document.getElementById(`audio-${userId}`);
+                    if (audio) audio.remove();
+                    removeParticipant(userId);
+                }
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    localStream = null;
+                }
+                document.getElementById("startCallBtn").style.display = "inline-block";
+                //document.getElementById("leaveCallBtn").style.display = "none";
+                leaveCallBtn.style.display = "none";
+                muteToggleBtn.style.display = "none";
+                removeParticipant(username);
+            } else {
+                console.warn("⚠️ leaveCallBtn not found in DOM");
             }
 
-            if (data.type === "answer" && target === username) {
-                const peer = peers[sender];
-                await peer.setRemoteDescription(new RTCSessionDescription(data.answer));
+            //});
+            if (muteToggleBtn) {
+                muteToggleBtn.addEventListener("click", () => {
+                    // if (!localStream) return;
+                    // localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
+                    // isMuted = !isMuted;
+                    // document.getElementById("muteToggleBtn").textContent = isMuted ? "Unmute" : "Mute";
+                    if (!localStream) return;
+                    localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
+                    isMuted = !isMuted;
+
+                    muteToggleBtn.textContent = isMuted ? "Unmute" : "Mute";
+
+                    // Update mic icon
+                    const micIcon = document.querySelector(`#participant-${username} .mic-status`);
+                    if (micIcon) {
+                        micIcon.innerHTML = isMuted ? "🔇" : "🎙️";
+                    }
+                });
+            } else {
+                console.warn("⚠️ muteToggleBtn not found in DOM");
             }
 
-            if (data.type === "candidate" && target === username) {
-                const peer = peers[sender];
-                if (peer) {
-                    await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log(`In socket.onmessage event data.type----- !!!`, data.type);
+                if (data.type === "chat") {
+                    const chatBox = document.getElementById("chatMessages");
+                    const msg = document.createElement("div");
+                    msg.textContent = `${data.sender}: ${data.message}`;
+                    chatBox.appendChild(msg);
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
+
+                else if (data.type === "user_joined") {
+                    console.log(`👤 User ${data.user_id} joined`);
+                    const participantBox = document.getElementById("participants");
+                    const li = document.createElement("li");
+                    li.textContent = data.username;
+                    participantList.appendChild(li);
+
+                    // const userEntry = document.createElement("div");
+                    // debugger;
+                    // userEntry.textContent = `User ${data.user_id} joined`;
+                    // participantBox.appendChild(userEntry);
+                }
+
+                // You can add more types later: mute_status, user_left, etc.
+            };
+
+            const chatInput = document.getElementById("chatInput");
+            //console.log("chatInput:", chatInput);
+            if (chatInput) {
+                chatInput.addEventListener("keypress", (e) => {
+                    if (e.key === "Enter") sendChatMessage();
+                });
+            } else {
+                console.warn("⚠️ chatInput not found");
+            }
+
+            const chatMessages = document.getElementById("chatMessages");
+            //console.log("chatMessages:", chatMessages);
+
+            const userList = document.getElementById("userList");
+            //console.log("userList:", userList);
+
+
+            document.querySelectorAll("#userList button").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    const userId = btn.getAttribute("onclick").match(/'(\d+)'/)[1];
+                    inviteUser(userId);
+                });
+            });
+
+            function sendChatMessage() {
+                const input = document.getElementById("chatInput");
+                const message = input.value.trim();
+                if (message) {
+                    socket.send(JSON.stringify({
+                        type: "chat",
+                        sender: username,
+                        message: message
+                    }));
+                    input.value = "";
                 }
             }
-        };
+        });
+
+        document.querySelectorAll(".invite-btn").forEach(button => {
+            button.addEventListener("click", event => {
+                event.preventDefault();
+                // const targetUser = button.dataset.username; 
+                // const listItem = event.target.closest("li");
+                // const userId = listItem.dataset.userId;
+                // const roomName = "my-room"; // or get from input/UI
+                const listItem = event.target.closest("li");
+                const userId = listItem.dataset.userId;
+                const roomName = document.getElementById("meeting-container").dataset.roomName;
+
+                inviteUser(userId, roomName);  // ✅ pass both
+
+                //window.location.href = `/meeting/${roomName}/${userId}/`;
+            });
+        });
+
+        function inviteUser(userId, roomName) {
+            fetch("/api/send-meeting-invite/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ room: roomName, target: userId })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === "invite sent") {
+                        window.location.href = `/meeting/${roomName}/${userId}/`;
+                    } else {
+                        console.error("Unexpected invite response:", data);
+                    }
+                })
+                .catch(err => console.error("Invite error:", err));
+        }
+
+        // function inviteUser(userId) {
+        //     fetch("/api/send-meeting-invite/", {
+        //         method: "POST",
+        //         headers: { "Content-Type": "application/json" },
+        //         body: JSON.stringify({ room: roomNameN, target: userId })
+        //     })
+        //         .then(res => res.json())
+        //         .then(data => {
+        //             if (data.status === "invite sent") {
+        //                 window.location.href = `/meeting/${roomNameN}/${userId}/`;
+        //             }
+        //         })
+        //         .catch(err => console.error("Invite error:", err));
+        // }
 
         function monitorMicActivity(stream, userId) {
             const audioCtx = new AudioContext();
@@ -201,13 +379,6 @@
         }
 
         function addParticipant(name) {
-            //   if (participants.has(name)) return;
-            //   participants.add(name);
-            //   const li = document.createElement("li");
-            //   li.className = "list-group-item";
-            //   li.id = `participant-${name}`;
-            //   li.textContent = name;
-            //   document.getElementById("participantList").appendChild(li);
             if (participants.has(name)) return;
             participants.add(name);
 
