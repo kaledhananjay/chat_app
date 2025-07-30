@@ -312,7 +312,8 @@ def meeting_room(request, room_name, user_id):
     invited_user = get_object_or_404(User, id=user_id)
     return render(request, "meeting.html", {
         "room_name": room_name,
-        "username": invited_user.username 
+        #"username": invited_user.username 
+        "username": request.user.username
     })
 
 @csrf_exempt  # Optional: remove if using CSRF tokens

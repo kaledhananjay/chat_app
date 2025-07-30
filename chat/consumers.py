@@ -1,3 +1,4 @@
+from pkgutil import get_data
 from channels.generic.websocket import AsyncWebsocketConsumer
 import json
 
@@ -18,13 +19,38 @@ class MeetingConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
     async def receive(self, text_data):
-        await self.channel_layer.group_send(
+        print("🔍 Incoming WebSocket message:", text_data)
+        data = json.loads(text_data)
+        
+        msg_type = data.get("type")
+        if data["type"] == "join":
+            await self.channel_layer.group_add(
+                self.room_group_name,
+                self.channel_name
+            )
+            # ✅ Broadcast a transformed message
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "user_joined",
+                    "username": data.get("user_id", "anonymous")
+                }
+            )
+        else:
+            # ✅ Forward other messages (e.g., chat, signal)
+            await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     "type": "signal_message",
                     "message": text_data
                 }
             )
+    
+    async def user_joined(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "user_joined",
+            "username": event["username"]
+        }))
         
     async def signal_message(self, event):
         await self.send(text_data=event["message"])

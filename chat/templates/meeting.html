@@ -40,6 +40,21 @@
             padding: 10px;
             border-radius: 5px;
         }
+
+        .invited-btn {
+            background-color: #ccc;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        .invite-badge {
+            margin-left: 10px;
+            padding: 2px 6px;
+            background-color: #4caf50;
+            color: white;
+            border-radius: 4px;
+            font-size: 0.8em;
+        }
     </style>
 </head>
 
@@ -66,9 +81,8 @@
                     <li class="list-group-item d-flex justify-content-between align-items-center"
                         data-user-id="{{ user.id }}" data-username="{{ user.username }}">
                         {{ user.username }}
-                        <!-- <button class="btn btn-sm btn-outline-primary"
-                            onclick="inviteUser(event,'{{ user.id }}')">Invite</button> -->
-                        <button class="btn btn-sm btn-outline-primary invite-btn" id="invite-button">Invite</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary invite-btn"
+                            id="invite-button">Invite</button>
                     </li>
                     {% empty %}
                     <li class="list-group-item text-muted">No users available to invite</li>
@@ -79,11 +93,6 @@
                     <!-- Joined users will appear here -->
                 </ul>
             </div>
-            <!-- <div class="participant-list mt-4">
-                <h6>✅ In Meeting</h6>
-                <ul id="participants" class="list-group">
-                </ul>
-            </div> -->
             <!-- 💬 Chat Box -->
             <div class="col-md-9 border-start">
                 <h5>💬 Chat</h5>
@@ -98,10 +107,21 @@
 
         </div>
     </div>
-    <!-- <input type="hidden" id="roomName" value="{{ room_name }}"> -->
     <input type="hidden" id="username" value="{{ username }}">
-    <div id="meeting-container" data-room-name="{{ room_name }}" data-user-id="{{ username }}"></div>
+    <div id="meeting-container" data-room-name="{{ room_name }}" data-user-id="{{ username }}">
+        <ul>
+            {% for user in users %}
+            <li data-user-id="{{ user.id }}" data-username="{{ user.username }}">
+                {{ user.username }}
+                <button class="invite-btn">Invite</button>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
     <script>
+        window.addEventListener("beforeunload", () => {
+            console.log("🔁 Page is about to refresh");
+        });
         let roomNameN = null
         document.addEventListener("DOMContentLoaded", () => {
             let leaveBtn = null;
@@ -134,8 +154,10 @@
                 console.log("✅ WebSocket connected");
 
                 const roomName = document.getElementById("meeting-container").dataset.roomName;
-                const username = document.getElementById("meeting-container").dataset.username;
+                const username = document.getElementById("meeting-container").dataset.userId;
 
+                console.log("👤 username:", username);
+                console.log("📤 Sending join:", { type: "join", user_id: username, room: roomName });
 
                 // Send join event
                 socket.send(JSON.stringify({
@@ -144,10 +166,6 @@
                     room: roomName
                 }));
             };
-
-            // socket.onopen = () => {
-            //     console.log("✅ WebSocket connected");
-            // };
 
             document.getElementById("startCallBtn").addEventListener("click", async () => {
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -160,9 +178,6 @@
                 addParticipant(username);
             });
 
-
-            //const leaveBtn = document.getElementById("leaveBtn");
-            //document.getElementById("leaveCallBtn").addEventListener("click", () => {
             if (leaveCallBtn) {
                 Object.values(peers).forEach(peer => peer.close());
                 for (const userId in peers) {
@@ -175,7 +190,6 @@
                     localStream = null;
                 }
                 document.getElementById("startCallBtn").style.display = "inline-block";
-                //document.getElementById("leaveCallBtn").style.display = "none";
                 leaveCallBtn.style.display = "none";
                 muteToggleBtn.style.display = "none";
                 removeParticipant(username);
@@ -183,13 +197,8 @@
                 console.warn("⚠️ leaveCallBtn not found in DOM");
             }
 
-            //});
             if (muteToggleBtn) {
                 muteToggleBtn.addEventListener("click", () => {
-                    // if (!localStream) return;
-                    // localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
-                    // isMuted = !isMuted;
-                    // document.getElementById("muteToggleBtn").textContent = isMuted ? "Unmute" : "Mute";
                     if (!localStream) return;
                     localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
                     isMuted = !isMuted;
@@ -208,7 +217,9 @@
 
             socket.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                console.log(`In socket.onmessage event data.type----- !!!`, data.type);
+                console.log(`📨 Received socket message:`, data);
+                const currentUserId = document.getElementById("meeting-container").dataset.userId;
+
                 if (data.type === "chat") {
                     const chatBox = document.getElementById("chatMessages");
                     const msg = document.createElement("div");
@@ -218,19 +229,24 @@
                 }
 
                 else if (data.type === "user_joined") {
-                    console.log(`👤 User ${data.user_id} joined`);
+                    console.log(`👤 User ${data.username} joined`);
                     const participantBox = document.getElementById("participants");
                     const li = document.createElement("li");
                     li.textContent = data.username;
-                    participantList.appendChild(li);
-
-                    // const userEntry = document.createElement("div");
-                    // debugger;
-                    // userEntry.textContent = `User ${data.user_id} joined`;
-                    // participantBox.appendChild(userEntry);
+                    participantBox.appendChild(li);  // ✅ fixed variable name
                 }
 
-                // You can add more types later: mute_status, user_left, etc.
+                else if (data.type === "meeting_invite") {
+                    console.log(`📥 Meeting invite received from ${data.sender} for room ${data.room}`);
+
+                    if (data.target === currentUserId) {
+                        // ✅ Only redirect the invited user
+                        window.location.href = `/meeting/${data.room}/${data.sender}/`;
+                    } else {
+                        // Optional: show a toast or log
+                        console.log(`ℹ️ Invite was for ${data.target}, not ${currentUserId}`);
+                    }
+                }
             };
 
             const chatInput = document.getElementById("chatInput");
@@ -244,18 +260,8 @@
             }
 
             const chatMessages = document.getElementById("chatMessages");
-            //console.log("chatMessages:", chatMessages);
 
             const userList = document.getElementById("userList");
-            //console.log("userList:", userList);
-
-
-            document.querySelectorAll("#userList button").forEach(btn => {
-                btn.addEventListener("click", () => {
-                    const userId = btn.getAttribute("onclick").match(/'(\d+)'/)[1];
-                    inviteUser(userId);
-                });
-            });
 
             function sendChatMessage() {
                 const input = document.getElementById("chatInput");
@@ -273,22 +279,28 @@
 
         document.querySelectorAll(".invite-btn").forEach(button => {
             button.addEventListener("click", event => {
-                event.preventDefault();
-                // const targetUser = button.dataset.username; 
-                // const listItem = event.target.closest("li");
-                // const userId = listItem.dataset.userId;
-                // const roomName = "my-room"; // or get from input/UI
-                const listItem = event.target.closest("li");
-                const userId = listItem.dataset.userId;
-                const roomName = document.getElementById("meeting-container").dataset.roomName;
+                try {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const listItem = event.target.closest("li");
+                    const userId = listItem.dataset.userId;
+                    const roomName = document.getElementById("meeting-container")?.dataset?.roomName;
 
-                inviteUser(userId, roomName);  // ✅ pass both
+                    if (!userId || !roomName) {
+                        console.error("❌ Missing userId or roomName", { userId, roomName });
+                        return;
+                    }
 
-                //window.location.href = `/meeting/${roomName}/${userId}/`;
+                    console.log("✅ Inviting user:", userId, "to room:", roomName);
+                    inviteUser(userId, roomName, button, listItem);  // ✅ pass both
+                } catch (err) {
+                    console.error("Error in click handler:", err);
+                }
             });
         });
 
-        function inviteUser(userId, roomName) {
+        function inviteUser(userId, roomName, button, listItem) {
+            console.log("Inviting user:", userId, "to room:", roomName);
             fetch("/api/send-meeting-invite/", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -297,28 +309,28 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.status === "invite sent") {
-                        window.location.href = `/meeting/${roomName}/${userId}/`;
+                        console.log(`Invite sent to ${userId}`);
+                        setTimeout(() => {
+                            window.location.href = `/meeting/${roomName}/${userId}/`;
+                        }, 1500); // 1.5 seconds delay
+
+                        //window.open(`/meeting/${roomName}/${userId}/`, "_blank");
+                        button.textContent = "Invited";
+                        button.disabled = true;
+                        button.classList.add("invited-btn");
+
+                        const badge = document.createElement("span");
+                        badge.textContent = "✅ Invited";
+                        badge.className = "invite-badge";
+                        listItem.appendChild(badge);
+                        console.log("Appending badge to:", listItem);
+
                     } else {
                         console.error("Unexpected invite response:", data);
                     }
                 })
                 .catch(err => console.error("Invite error:", err));
         }
-
-        // function inviteUser(userId) {
-        //     fetch("/api/send-meeting-invite/", {
-        //         method: "POST",
-        //         headers: { "Content-Type": "application/json" },
-        //         body: JSON.stringify({ room: roomNameN, target: userId })
-        //     })
-        //         .then(res => res.json())
-        //         .then(data => {
-        //             if (data.status === "invite sent") {
-        //                 window.location.href = `/meeting/${roomNameN}/${userId}/`;
-        //             }
-        //         })
-        //         .catch(err => console.error("Invite error:", err));
-        // }
 
         function monitorMicActivity(stream, userId) {
             const audioCtx = new AudioContext();
