@@ -1,0 +1,67 @@
+<!-- chat/templates/meeting/room_embed.html -->
+<div id="meeting-ui">
+    <h2>Meeting Room: {{ room_name }}</h2>
+    <p>User ID: {{ user_id }}</p>
+
+    <!-- 🎙️ Mic Toggle -->
+    <button id="micToggle">🎙️ Mic: Off</button>
+
+    <!-- 👥 Participant List -->
+    <h3>Participants</h3>
+    <ul id="participantList"></ul>
+</div>
+
+<script>
+    // Initialize meeting logic after DOM is ready
+    document.addEventListener("DOMContentLoaded", () => {
+        initMeetingRoom("{{ room_name }}", "{{ user_id }}");
+        function initMeetingRoom(roomName, userId) {
+            const micButton = document.getElementById("micToggle");
+            const participantList = document.getElementById("participantList");
+
+            let micOn = false;
+
+            // 🎙️ Mic Toggle Logic
+            micButton.onclick = () => {
+                micOn = !micOn;
+                micButton.textContent = micOn ? "🎙️ Mic: On" : "🎙️ Mic: Off";
+
+                // Send mic status to server
+                socket.send(JSON.stringify({
+                    type: "mic.status",
+                    user_id: userId,
+                    mic_on: micOn,
+                }));
+            };
+
+            // 🔌 Connect WebSocket
+            const socket = new WebSocket(`ws://${window.location.host}/ws/meeting/${roomName}/`);
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.type === "participant.update") {
+                    updateParticipantList(data.participants);
+                }
+
+                if (data.type === "mic.status") {
+                    // Optional: show mic status next to user
+                    const item = document.querySelector(`#user-${data.user_id}`);
+                    if (item) {
+                        item.textContent = `${data.username} (${data.mic_on ? "🎙️ On" : "🔇 Off"})`;
+                    }
+                }
+            };
+
+            function updateParticipantList(participants) {
+                participantList.innerHTML = "";
+                participants.forEach(user => {
+                    const li = document.createElement("li");
+                    li.id = `user-${user.id}`;
+                    li.textContent = `${user.username} (${user.mic_on ? "🎙️ On" : "🔇 Off"})`;
+                    participantList.appendChild(li);
+                });
+            }
+        }
+    });
+</script>

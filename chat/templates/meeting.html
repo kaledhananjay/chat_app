@@ -55,6 +55,41 @@
             border-radius: 4px;
             font-size: 0.8em;
         }
+
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 20px;
+            width: 80%;
+            height: 80%;
+            overflow-y: auto;
+            border-radius: 8px;
+            position: relative;
+        }
+
+        .close {
+            position: absolute;
+            top: 10px;
+            right: 20px;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 
@@ -118,6 +153,16 @@
             {% endfor %}
         </ul>
     </div>
+    <!-- Meeting room UI will be injected here -->
+    <div id="meetingModal" class="modal hidden">
+        <div class="modal-content">
+            <span id="closeMeetingModal" class="close">&times;</span>
+            <div id="meetingRoomContainer">
+                <!-- Meeting room UI will be injected here -->
+            </div>
+        </div>
+    </div>
+    <!-- Meeting room UI will be injected here -->
     <script>
         window.addEventListener("beforeunload", () => {
             console.log("🔁 Page is about to refresh");
@@ -292,7 +337,8 @@
                     }
 
                     console.log("✅ Inviting user:", userId, "to room:", roomName);
-                    inviteUser(userId, roomName, button, listItem);  // ✅ pass both
+                    //inviteUser(userId, roomName, button, listItem);  // ✅ pass both
+                    openMeetingModal(roomName, userId);
                 } catch (err) {
                     console.error("Error in click handler:", err);
                 }
@@ -416,6 +462,26 @@
             const li = document.getElementById(`participant-${name}`);
             if (li) li.remove();
         }
+
+        function openMeetingModal(roomName, userId) {
+            const modal = document.getElementById("meetingModal");
+            const container = document.getElementById("meetingRoomContainer");
+
+            modal.classList.remove("hidden");
+
+            // Load meeting room via AJAX or fetch
+            fetch(`/meeting/embed/${roomName}/${userId}/`)
+                .then(res => res.text())
+                .then(html => {
+                    container.innerHTML = html;
+                    // Optionally initialize JS logic for meeting room here
+                });
+        }
+
+        document.getElementById("closeMeetingModal").onclick = () => {
+            document.getElementById("meetingModal").classList.add("hidden");
+            document.getElementById("meetingRoomContainer").innerHTML = "";
+        };
     </script>
 </body>
 

@@ -398,3 +398,10 @@ async def user_joined(self, event):
         "type": "user_joined",
         "username": event["username"]
     }))        
+    
+def embedded_meeting_view(request, room_name, user_id):
+    # Render only the meeting room part
+    return render(request, "room_embed.html", {
+        "room_name": room_name,
+        "user_id": user_id,
+    })
