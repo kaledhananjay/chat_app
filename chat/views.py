@@ -316,34 +316,57 @@ def meeting_room(request, room_name, user_id):
         "username": request.user.username
     })
 
-@csrf_exempt  # Optional: remove if using CSRF tokens
+# from django.views.decorators.csrf import csrf_exempt
+# from django.contrib.auth.decorators import login_required
+# from django.http import JsonResponse
+# from django.contrib.auth import get_user_model
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+# import json
+
+@csrf_exempt  # Optional: remove if using CSRF tokens via fetch
 @login_required
 def send_meeting_invite(request):
-    if request.method == "POST":
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid method"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        room = data.get("room")
+        target_id = data.get("target")
+        sender = request.user
+
+        if not room or not target_id:
+            return JsonResponse({"error": "Missing room or target"}, status=400)
+
+        User = get_user_model()
         try:
-            data = json.loads(request.body)
-            room = data.get("room")
-            target_id = data.get("target")
-            sender = request.user
+            target_user = User.objects.get(id=target_id)
+        except User.DoesNotExist:
+            return JsonResponse({"error": "Target user not found"}, status=404)
 
-            if not room or not target_id:
-                return JsonResponse({"error": "Missing room or target"}, status=400)
+        # ✅ Save invite to DB
+        MeetingInvite.objects.create(sender=sender, target=target_user, room=room)
 
-            User = get_user_model()
-            try:
-                target_user = User.objects.get(id=target_id)
-            except User.DoesNotExist:
-                return JsonResponse({"error": "Target user not found"}, status=404)
+        print(f"📨 Meeting invite from {sender.username} to {target_user.username} for room {room}")
 
-            # ✅ Save invite to DB
-            MeetingInvite.objects.create(sender=sender, target=target_user, room=room)
+        # ✅ Send WebSocket notification to invited user
+        channel_layer = get_channel_layer()
+        print(f"Sending invite to user_{target_user.id}")
+        async_to_sync(channel_layer.group_send)(
+            f"user_{target_user.id}",
+            {
+                "type": "receive_invite",
+                "room": room,
+                "from": sender.username
+            }
+        )
+        print("Invite sent via Channels")
+        return JsonResponse({"status": "invite sent", "room": room})
 
-            print(f"📨 Meeting invite from {sender.username} to {target_user.username} for room {room}")
-
-            return JsonResponse({"status": "invite sent", "room": room})
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=400)
-
+    except Exception as e:
+        print("❌ Error sending invite:", str(e))
+        return JsonResponse({"error": str(e)}, status=400)
 
 
 

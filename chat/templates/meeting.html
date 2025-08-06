@@ -90,6 +90,21 @@
         .hidden {
             display: none;
         }
+
+        .modal {
+            position: fixed;
+            top: 30%;
+            left: 50%;
+            transform: translate(-50%, -30%);
+            background: white;
+            border: 1px solid #ccc;
+            padding: 20px;
+            z-index: 1000;
+        }
+
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 
@@ -163,6 +178,14 @@
         </div>
     </div>
     <!-- Meeting room UI will be injected here -->
+    <div id="invite-modal" class="modal hidden">
+        <div class="modal-content">
+            <p><strong>User <span id="inviter-name"></span></strong> invited you to join room <strong><span
+                        id="invite-room"></span></strong>.</p>
+            <button id="accept-invite-btn">Join</button>
+            <button id="decline-invite-btn">Decline</button>
+        </div>
+    </div>
     <script>
         window.addEventListener("beforeunload", () => {
             console.log("🔁 Page is about to refresh");
@@ -262,7 +285,7 @@
 
             socket.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                console.log(`📨 Received socket message:`, data);
+                console.log(`📨 Received socket message:`, data.type);
                 const currentUserId = document.getElementById("meeting-container").dataset.userId;
 
                 if (data.type === "chat") {
@@ -280,6 +303,10 @@
                     li.textContent = data.username;
                     participantBox.appendChild(li);  // ✅ fixed variable name
                 }
+                if (data.type === "receive_invite") {
+                    console.log(`📨 Invite from ${data.from} to join room ${data.room}`);
+                    showInviteModal(data.room, data.from);
+                }
 
                 else if (data.type === "meeting_invite") {
                     console.log(`📥 Meeting invite received from ${data.sender} for room ${data.room}`);
@@ -293,6 +320,22 @@
                     }
                 }
             };
+
+            function showInviteModal(roomName, inviterId) {
+                const modal = document.getElementById("invite-modal");
+                document.getElementById("inviter-name").textContent = inviterId;
+                document.getElementById("invite-room").textContent = roomName;
+
+                modal.classList.remove("hidden");
+
+                document.getElementById("accept-invite-btn").onclick = () => {
+                    window.location.href = `/meeting/${roomName}/${currentUserId}/`;
+                };
+
+                document.getElementById("decline-invite-btn").onclick = () => {
+                    modal.classList.add("hidden");
+                };
+            }
 
             const chatInput = document.getElementById("chatInput");
             //console.log("chatInput:", chatInput);
@@ -337,16 +380,46 @@
                     }
 
                     console.log("✅ Inviting user:", userId, "to room:", roomName);
-                    //inviteUser(userId, roomName, button, listItem);  // ✅ pass both
-                    openMeetingModal(roomName, userId);
+                    inviteUser(userId, roomName, button, listItem);  // ✅ pass both
                 } catch (err) {
                     console.error("Error in click handler:", err);
                 }
             });
         });
 
+        // function inviteUser(userId, roomName, button, listItem) {
+        //     console.log("Inviting user:", userId, "to room:", roomName);
+        //     fetch("/api/send-meeting-invite/", {
+        //         method: "POST",
+        //         headers: { "Content-Type": "application/json" },
+        //         body: JSON.stringify({ room: roomName, target: userId })
+        //     })
+        //         .then(res => res.json())
+        //         .then(data => {
+        //             if (data.status === "invite sent") {
+        //                 console.log(`Invite sent to ${userId}`);
+        //                 button.textContent = "Invited";
+        //                 button.disabled = true;
+        //                 button.classList.add("invited-btn");
+
+        //                 const badge = document.createElement("span");
+        //                 badge.textContent = "✅ Invited";
+        //                 badge.className = "invite-badge";
+        //                 listItem.appendChild(badge);
+        //                 console.log("Appending badge to:", listItem);
+
+        //                 window.location.href = `/meeting/${roomName}/${userId}/`;
+        //                 //window.open(`/meeting/${roomName}/${userId}/`, "_blank");
+        //             } else {
+        //                 console.error("Unexpected invite response:", data);
+        //             }
+        //         })
+        //         .catch(err => console.error("Invite error:", err));
+        // }
+
         function inviteUser(userId, roomName, button, listItem) {
             console.log("Inviting user:", userId, "to room:", roomName);
+
             fetch("/api/send-meeting-invite/", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -356,11 +429,6 @@
                 .then(data => {
                     if (data.status === "invite sent") {
                         console.log(`Invite sent to ${userId}`);
-                        setTimeout(() => {
-                            window.location.href = `/meeting/${roomName}/${userId}/`;
-                        }, 1500); // 1.5 seconds delay
-
-                        //window.open(`/meeting/${roomName}/${userId}/`, "_blank");
                         button.textContent = "Invited";
                         button.disabled = true;
                         button.classList.add("invited-btn");
@@ -371,6 +439,7 @@
                         listItem.appendChild(badge);
                         console.log("Appending badge to:", listItem);
 
+                        // ❌ Remove redirect — inviter stays in current room
                     } else {
                         console.error("Unexpected invite response:", data);
                     }

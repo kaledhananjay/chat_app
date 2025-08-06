@@ -4,24 +4,30 @@ import json
 
 class MeetingConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        print("MeetingConsumer connect called")
         self.room_name = self.scope["url_route"]["kwargs"]["room_name"]
-        self.room_group_name = f"meeting_{self.room_name}"
-        print(f"🔌 Connecting to room: {self.room_name}")
+        self.user = self.scope["user"]
+        self.user_group = f"user_{self.user.id}"
+        #print(f"🔍 Scope user: {user} (type: {type(user)})")
         
-        client_ip, client_port = self.scope["client"]
-        print(f"🔌 WebSocket connected from {client_ip}:{client_port} to room: {self.room_name}")
+        #await self.channel_layer.group_add(f"user_{user.id}", self.channel_name)
+        
+        if self.user.is_anonymous:
+            #print("❌ Anonymous user — closing connection")
+            await self.close()
+            return
 
-        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        await self.channel_layer.group_add(f"user_{user.id}", self.channel_name)
         await self.accept()
-        
+        print(f"✅ Connected: {self.user.username} added to {self.user_group} in room {self.room_name}")
         await self.send_participant_list()
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        if hasattr(self, "room_group_name"):
+            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+
 
     async def receive(self, text_data):
-        print("🔍 Incoming WebSocket message:", text_data)
+        #print("🔍 Incoming WebSocket message:", text_data)
         data = json.loads(text_data)
         
         msg_type = data.get("type")
@@ -94,11 +100,16 @@ class MeetingConsumer(AsyncWebsocketConsumer):
 
     async def signal_message(self, event):
         await self.send(text_data=event["message"])
+    
+    async def receive_invite(self, event):
+        #print(f"📨 Received invite event: {event}") 
+        await self.send(text_data=json.dumps({
+            "type": "receive_invite",
+            "room": event["room"],
+            "from": event["from"]
+        }))
         
 class FallbackConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        print(f"⚠️ FallbackConsumer triggered for path: {self.scope['path']}")
+        #print(f"⚠️ FallbackConsumer triggered for path: {self.scope['path']}")
         await self.close()
-
-
-
