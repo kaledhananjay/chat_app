@@ -7,6 +7,8 @@ class MeetingConsumer(AsyncWebsocketConsumer):
         self.room_name = self.scope["url_route"]["kwargs"]["room_name"]
         self.user = self.scope["user"]
         self.user_group = f"user_{self.user.id}"
+        self.room_group_name = f"chat_{self.room_name}"
+
         #print(f"🔍 Scope user: {user} (type: {type(user)})")
         
         #await self.channel_layer.group_add(f"user_{user.id}", self.channel_name)
@@ -16,7 +18,8 @@ class MeetingConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
 
-        await self.channel_layer.group_add(f"user_{user.id}", self.channel_name)
+        #await self.channel_layer.group_add(f"user_{self.user.id}", self.channel_name)
+        await self.channel_layer.group_add(self.user_group, self.channel_name)
         await self.accept()
         print(f"✅ Connected: {self.user.username} added to {self.user_group} in room {self.room_name}")
         await self.send_participant_list()
@@ -63,6 +66,9 @@ class MeetingConsumer(AsyncWebsocketConsumer):
                     "username": self.scope["user"].username,
                 }
             )
+        if not hasattr(self, "room_group_name"):
+            print("⚠️ Tried to send before joining a room")
+            return
             
     async def mic_status(self, event):
         await self.send(text_data=json.dumps({
@@ -113,3 +119,26 @@ class FallbackConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         #print(f"⚠️ FallbackConsumer triggered for path: {self.scope['path']}")
         await self.close()
+        
+from channels.generic.websocket import AsyncWebsocketConsumer
+import json
+
+class NotificationConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.user = self.scope["user"]
+        if self.user.is_authenticated:
+            await self.channel_layer.group_add(f"user_{self.user.id}", self.channel_name)
+            await self.accept()
+            print(f"✅ NotificationConsumer connected for user_{self.user.id}")
+        else:
+            await self.close()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(f"user_{self.user.id}", self.channel_name)
+
+    async def receive_invite(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "receive_invite",
+            "room": event["room"],
+            "from": event["from"]
+        }))

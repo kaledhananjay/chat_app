@@ -235,6 +235,15 @@
                 }));
             };
 
+            socket.onerror = (error) => {
+                console.error("❌ WebSocket error:", error);
+            };
+
+            socket.onclose = (event) => {
+                console.warn("⚠️ WebSocket closed:", event);
+            };
+
+
             document.getElementById("startCallBtn").addEventListener("click", async () => {
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
@@ -284,6 +293,7 @@
             }
 
             socket.onmessage = (event) => {
+                console.log("Socket readyState:", socket.readyState);
                 const data = JSON.parse(event.data);
                 console.log(`📨 Received socket message:`, data.type);
                 const currentUserId = document.getElementById("meeting-container").dataset.userId;
