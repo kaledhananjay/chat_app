@@ -28,9 +28,8 @@ class MeetingConsumer(AsyncWebsocketConsumer):
         if hasattr(self, "room_group_name"):
             await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
-
     async def receive(self, text_data):
-        #print("🔍 Incoming WebSocket message:", text_data)
+        print("🔍 Incoming WebSocket message:", text_data)
         data = json.loads(text_data)
         
         msg_type = data.get("type")
@@ -47,6 +46,21 @@ class MeetingConsumer(AsyncWebsocketConsumer):
                     "username": data.get("user_id", "anonymous")
                 }
             )
+        elif msg_type == "invite":
+            print("MeetingConsumer-receive ", msg_type)
+            target_user_id = data["target_user_id"]
+            room = data["room"]
+            sender = self.scope["user"].username
+
+            await self.channel_layer.group_send(
+                f"user_{target_user_id}",
+                {
+                    "type": "receive_invite",
+                    "room": room,
+                    "from": sender
+                }
+            )
+            print(f"📤 Sent invite to user_{target_user_id} for room {room}")
         else:
             # ✅ Forward other messages (e.g., chat, signal)
             await self.channel_layer.group_send(
@@ -95,7 +109,6 @@ class MeetingConsumer(AsyncWebsocketConsumer):
         
     async def signal_message(self, event):
         await self.send(text_data=event["message"])
-
         
     async def send_meeting_invite(self, event):
         await self.send(text_data=json.dumps({
@@ -108,7 +121,7 @@ class MeetingConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=event["message"])
     
     async def receive_invite(self, event):
-        #print(f"📨 Received invite event: {event}") 
+        print(f"📨 Received invite event-consumer: {event}") 
         await self.send(text_data=json.dumps({
             "type": "receive_invite",
             "room": event["room"],

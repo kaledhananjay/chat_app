@@ -21,6 +21,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.contrib.auth import get_user_model
 
+
 @login_required
 def chat_list_view(request):
     users = User.objects.exclude(
@@ -363,7 +364,6 @@ def send_meeting_invite(request):
         )
         print("Invite sent via Channels")
         return JsonResponse({"status": "invite sent", "room": room})
-
     except Exception as e:
         print("❌ Error sending invite:", str(e))
         return JsonResponse({"error": str(e)}, status=400)
@@ -428,3 +428,41 @@ def embedded_meeting_view(request, room_name, user_id):
         "room_name": room_name,
         "user_id": user_id,
     })
+    
+
+@login_required
+def get_pending_invites(request):
+    user = request.user
+    invites = MeetingInvite.objects.filter(target=user, status="pending")
+    data = [
+        {
+            "id": invite.id,
+            "sender": invite.sender.username,
+            "room": invite.room,
+            "timestamp": invite.timestamp.isoformat()
+        }
+        for invite in invites
+    ]
+    return JsonResponse({"invites": data})
+
+
+
+@csrf_exempt
+@login_required
+def respond_to_invite(request):
+    if request.method == "POST":
+        data = json.loads(request.body)
+        invite_id = data.get("invite_id")
+        action = data.get("action")  # "accept" or "reject"
+
+        try:
+            invite = MeetingInvite.objects.get(id=invite_id, target=request.user)
+            invite.status = "accepted" if action == "accept" else "rejected"
+            invite.save()
+
+            # Optional: Send WebSocket notification to sender
+            # channel_layer.group_send(f"user_{invite.sender.id}", {...})
+
+            return JsonResponse({"success": True})
+        except MeetingInvite.DoesNotExist:
+            return JsonResponse({"error": "Invite not found"}, status=404)

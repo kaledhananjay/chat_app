@@ -105,6 +105,72 @@
         .hidden {
             display: none;
         }
+
+        /* Fullscreen modal backdrop */
+        .modal {
+            position: fixed;
+            top: 50;
+            left: 50;
+            width: 100vw;
+            height: 50vh;
+            background: rgba(0, 0, 0, 0.5);
+            /* dark overlay */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        /* Hide modal by default */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Modal content box */
+        .modal-content {
+            background: #fff;
+            padding: 2rem;
+            border-radius: 10px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        /* Buttons */
+        #accept-invite-btn,
+        #decline-invite-btn {
+            margin: 1rem 0.5rem 0;
+            padding: 0.6rem 1.2rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+
+        #accept-invite-btn {
+            background-color: #4caf50;
+            color: white;
+        }
+
+        #decline-invite-btn {
+            background-color: #f44336;
+            color: white;
+        }
+
+        /* Fade-in animation */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
     </style>
 </head>
 
@@ -180,8 +246,10 @@
     <!-- Meeting room UI will be injected here -->
     <div id="invite-modal" class="modal hidden">
         <div class="modal-content">
-            <p><strong>User <span id="inviter-name"></span></strong> invited you to join room <strong><span
-                        id="invite-room"></span></strong>.</p>
+            <p>
+                <strong>User <span id="inviter-name"></span></strong> invited you to join room
+                <strong><span id="invite-room"></span></strong>.
+            </p>
             <button id="accept-invite-btn">Join</button>
             <button id="decline-invite-btn">Decline</button>
         </div>
@@ -211,6 +279,8 @@
             const username = document.getElementById("username").value;
             const roomName = document.getElementById("meeting-container").dataset.roomName;
             const socket = new WebSocket(`ws://${window.location.host}/ws/meeting/${roomName}/`);
+            const notificationSocket = new WebSocket(`wss://${window.location.host}/ws/notifications/`);
+
             roomNameN = roomName
             const peers = {};
             let localStream = null;
@@ -218,14 +288,30 @@
             const participants = new Set();
             const userId = window.location.pathname.split("/")[3];   // "2"
 
+            notificationSocket.onopen = () => {
+                console.log("🔔 Notification WebSocket connected");
+            };
+
+            notificationSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log("📨 Notification received:", data);
+
+                if (data.type === "receive_invite") {
+                    showInviteModal({
+                        sender: data.from,
+                        room: data.room
+                    });
+                }
+            };
+
             socket.onopen = () => {
                 console.log("✅ WebSocket connected");
 
                 const roomName = document.getElementById("meeting-container").dataset.roomName;
                 const username = document.getElementById("meeting-container").dataset.userId;
 
-                console.log("👤 username:", username);
-                console.log("📤 Sending join:", { type: "join", user_id: username, room: roomName });
+                //console.log("👤 username:", username);
+                //console.log("📤 Sending join:", { type: "join", user_id: username, room: roomName });
 
                 // Send join event
                 socket.send(JSON.stringify({
@@ -242,7 +328,6 @@
             socket.onclose = (event) => {
                 console.warn("⚠️ WebSocket closed:", event);
             };
-
 
             document.getElementById("startCallBtn").addEventListener("click", async () => {
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -293,9 +378,9 @@
             }
 
             socket.onmessage = (event) => {
-                console.log("Socket readyState:", socket.readyState);
+                //console.log("Socket readyState:", socket.readyState);
                 const data = JSON.parse(event.data);
-                console.log(`📨 Received socket message:`, data.type);
+                console.log("🔍 WebSocket message received:", data.type);
                 const currentUserId = document.getElementById("meeting-container").dataset.userId;
 
                 if (data.type === "chat") {
@@ -313,21 +398,34 @@
                     li.textContent = data.username;
                     participantBox.appendChild(li);  // ✅ fixed variable name
                 }
-                if (data.type === "receive_invite") {
+                else if (data.type === "receive_invite") {
                     console.log(`📨 Invite from ${data.from} to join room ${data.room}`);
-                    showInviteModal(data.room, data.from);
+                    //showInviteModal(data.room, data.from);
+                    console.log("📨 Invite received:", data);
+                    showInviteModal({
+                        sender: data.from,
+                        room: data.room
+                    });
                 }
 
                 else if (data.type === "meeting_invite") {
-                    console.log(`📥 Meeting invite received from ${data.sender} for room ${data.room}`);
+                    //console.log(`📥 Meeting invite received from ${data.sender} for room ${data.room}`);
 
                     if (data.target === currentUserId) {
                         // ✅ Only redirect the invited user
                         window.location.href = `/meeting/${data.room}/${data.sender}/`;
                     } else {
                         // Optional: show a toast or log
-                        console.log(`ℹ️ Invite was for ${data.target}, not ${currentUserId}`);
+                        //console.log(`ℹ️ Invite was for ${data.target}, not ${currentUserId}`);
                     }
+                }
+                else if (data.type === "invite") {
+                    //console.log(`📥 Meeting invite received from ${data.sender} for room ${data.room}`);
+                    showInviteModal({
+                        id: data.invite_id,
+                        sender: data.sender,
+                        room: data.room
+                    });
                 }
             };
 
@@ -345,6 +443,69 @@
                 document.getElementById("decline-invite-btn").onclick = () => {
                     modal.classList.add("hidden");
                 };
+            }
+
+            function fetchPendingInvites() {
+                fetch("/api/invites/pending/")
+                    .then(res => res.json())
+                    .then(data => {
+                        const invites = data.invites;
+                        if (invites.length === 0) {
+                            console.log("📭 No pending invites");
+                            return;
+                        }
+
+                        invites.forEach(invite => {
+                            showInvitePopup(invite);
+                        });
+                    })
+                    .catch(err => console.error("❌ Error fetching invites:", err));
+            }
+
+            function showInviteModal(invite) {
+                document.getElementById("inviter-name").textContent = invite.sender;
+                document.getElementById("invite-room").textContent = invite.room;
+
+                const modal = document.getElementById("invite-modal");
+                modal.classList.remove("hidden");
+
+                // Attach handlers
+                document.getElementById("accept-invite-btn").onclick = () => respondToInvite(invite.id, "accept");
+                document.getElementById("decline-invite-btn").onclick = () => respondToInvite(invite.id, "reject");
+            }
+
+            function respondToInvite(inviteId, action) {
+                fetch("/api/invites/respond/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ invite_id: inviteId, action: action })
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            console.log(`✅ Invite ${action}ed`);
+
+                            // Hide modal
+                            document.getElementById("invite-modal").classList.add("hidden");
+
+                            // Redirect if accepted
+                            if (action === "accept" && data.room) {
+                                window.location.href = `/meeting/${data.room}/`;
+                            }
+
+                            // Optionally notify inviter via WebSocket
+                            if (window.socket) {
+                                socket.send(JSON.stringify({
+                                    type: "invite_response",
+                                    target: data.sender,
+                                    status: action
+                                }));
+                            }
+                        } else {
+                            console.error("❌ Invite response failed:", data.error);
+                        }
+                    })
+                    .catch(err => console.error("❌ Error responding to invite:", err));
             }
 
             const chatInput = document.getElementById("chatInput");
@@ -389,7 +550,7 @@
                         return;
                     }
 
-                    console.log("✅ Inviting user:", userId, "to room:", roomName);
+                    //console.log("✅ Inviting user:", userId, "to room:", roomName);
                     inviteUser(userId, roomName, button, listItem);  // ✅ pass both
                 } catch (err) {
                     console.error("Error in click handler:", err);
@@ -397,38 +558,8 @@
             });
         });
 
-        // function inviteUser(userId, roomName, button, listItem) {
-        //     console.log("Inviting user:", userId, "to room:", roomName);
-        //     fetch("/api/send-meeting-invite/", {
-        //         method: "POST",
-        //         headers: { "Content-Type": "application/json" },
-        //         body: JSON.stringify({ room: roomName, target: userId })
-        //     })
-        //         .then(res => res.json())
-        //         .then(data => {
-        //             if (data.status === "invite sent") {
-        //                 console.log(`Invite sent to ${userId}`);
-        //                 button.textContent = "Invited";
-        //                 button.disabled = true;
-        //                 button.classList.add("invited-btn");
-
-        //                 const badge = document.createElement("span");
-        //                 badge.textContent = "✅ Invited";
-        //                 badge.className = "invite-badge";
-        //                 listItem.appendChild(badge);
-        //                 console.log("Appending badge to:", listItem);
-
-        //                 window.location.href = `/meeting/${roomName}/${userId}/`;
-        //                 //window.open(`/meeting/${roomName}/${userId}/`, "_blank");
-        //             } else {
-        //                 console.error("Unexpected invite response:", data);
-        //             }
-        //         })
-        //         .catch(err => console.error("Invite error:", err));
-        // }
-
         function inviteUser(userId, roomName, button, listItem) {
-            console.log("Inviting user:", userId, "to room:", roomName);
+            //console.log("Inviting user:", userId, "to room:", roomName);
 
             fetch("/api/send-meeting-invite/", {
                 method: "POST",
@@ -438,7 +569,7 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.status === "invite sent") {
-                        console.log(`Invite sent to ${userId}`);
+                        //console.log(`Invite sent to ${userId}`);
                         button.textContent = "Invited";
                         button.disabled = true;
                         button.classList.add("invited-btn");

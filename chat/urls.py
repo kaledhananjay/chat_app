@@ -4,7 +4,8 @@ from .views import (
     current_user_view, save_message_view,
     meeting_room_group, meeting_room_direct,
     start_call, get_offer, send_answer, get_answer,
-    test_post, translate_audio,send_meeting_invite,embedded_meeting_view
+    test_post, translate_audio,send_meeting_invite,embedded_meeting_view,
+    get_pending_invites, respond_to_invite
 )
 
 urlpatterns = [
@@ -34,4 +35,6 @@ urlpatterns = [
     path("meeting/<str:room_name>/<int:target_id>/", meeting_room_direct, name="meeting_direct"),
     path("api/send-meeting-invite/", send_meeting_invite, name="send_meeting_invite"),
     path('meeting/embed/<str:room_name>/<int:user_id>/', embedded_meeting_view, name='embedded_meeting'),
+    path("api/invites/pending/", get_pending_invites, name="get_pending_invites"),
+    path("api/invites/respond/", respond_to_invite, name="respond_to_invite")
 ]
