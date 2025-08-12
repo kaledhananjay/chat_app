@@ -49,6 +49,95 @@
       justify-content: space-between;
       align-items: center;
     }
+
+    /* Modal backdrop */
+    .modal {
+      position: absolute;
+      top: 25%;
+      left: 25%;
+      width: 50vw;
+      height: 50vh;
+      background: rgba(0, 0, 0, 0.6);
+      /* dimmed overlay */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+
+    /* Hide by default */
+    .hidden {
+      display: none !important;
+    }
+
+    /* Modal content box */
+    .modal-content {
+      background: #fff;
+      padding: 2rem;
+      border-radius: 12px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
+      text-align: center;
+      animation: fadeIn 0.3s ease-in-out;
+    }
+
+    /* Title */
+    .modal-content h3 {
+      margin-bottom: 1rem;
+      font-size: 1.5rem;
+      color: #333;
+    }
+
+    /* Info text */
+    .modal-content p {
+      margin: 0.5rem 0;
+      font-size: 1rem;
+      color: #555;
+    }
+
+    /* Buttons */
+    #accept-invite-btn,
+    #decline-invite-btn {
+      margin: 1rem 0.5rem 0;
+      padding: 0.6rem 1.2rem;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    #accept-invite-btn {
+      background-color: #4caf50;
+      color: white;
+    }
+
+    #accept-invite-btn:hover {
+      background-color: #43a047;
+    }
+
+    #decline-invite-btn {
+      background-color: #f44336;
+      color: white;
+    }
+
+    #decline-invite-btn:hover {
+      background-color: #e53935;
+    }
+
+    /* Fade-in animation */
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.95);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
   </style>
 </head>
 
@@ -73,7 +162,7 @@
         <button id="stopCall" class="btn btn-outline-secondary me-2">🛑 Stop Call</button>
         <a href="{% url 'login' %}" class="btn btn-outline-danger">🚪 Logout</a>
         <div class="modal fade" id="incomingCallModal" tabindex="-1" aria-labelledby="incomingCallLabel"
-          aria-hidden="true">
+          aria-hidden="false">
           <div class="modal-dialog modal-dialog-bottom-end">
             <div class="modal-content">
               <div class="modal-header">
@@ -136,7 +225,17 @@
           </div>
         </div>
       </div>
-      <div id="inviteBox" class="mt-3"></div>
+      <!-- <div id="inviteBox" class="mt-3"></div> -->
+    </div>
+  </div>
+  <div id="invite-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>📞 Incoming Meeting Invite</h3>
+      <p><strong>From:</strong> <span id="inviter-name"></span>
+        <strong>Room:</strong> <span id="invite-room"></span>
+      </p>
+      <button id="accept-invite-btn" calss="btn btn-outline-primary">Accept</button>
+      <button id="decline-invite-btn" calss="btn btn-outline-danger">Reject</button>
     </div>
   </div>
   <script>
@@ -186,6 +285,12 @@
       const modalElement = document.getElementById("incomingCallModal");
       const modalEl = new bootstrap.Modal(modalElement);
       document.getElementById("stopCall").addEventListener("click", stopCall);
+      const notificationSocket = new WebSocket(`ws://${window.location.host}/ws/notifications/`);
+      const modalInvite = document.getElementById("invite-modal");
+      const acceptBtn = document.getElementById("accept-invite-btn");
+      const declineBtn = document.getElementById("decline-invite-btn");
+
+
 
       let localStream = null;
       let latestOffer = null;
@@ -198,6 +303,69 @@
       let testStream = null;
       let textToBeSent = null;
       let receiver = "{{ receiver.id }}";
+
+
+      notificationSocket.onopen = () => {
+        console.log("🔔 Notification WebSocket connected");
+      };
+
+      notificationSocket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        //console.log("📨 Notification received:", data);
+
+        if (data.type === "receive_invite") {
+          showInviteModal({
+            inviterId: data.from,
+            roomName: data.room
+          });
+        }
+      };
+
+      function showInviteModal(roomName, inviterId) {
+        inviterId = roomName.inviterId;
+        roomName = roomName.roomName
+        const modal = document.getElementById("invite-modal");
+        const nameSpan = document.getElementById("inviter-name");
+        const roomSpan = document.getElementById("invite-room");
+        console.log("inviter-name and invite-room")
+
+        if (!modal || !nameSpan || !roomSpan) {
+          console.error("❌ Modal or content elements not found.");
+          return;
+        }
+
+        nameSpan.textContent = inviterId;
+        roomSpan.textContent = roomName;
+
+        modal.classList.remove("hidden");
+
+        // function acceptInvite(roomName) {
+        //   console.log("✅ Invite accepted. Redirecting to room:", roomName);
+        //   window.location.href = `/meeting/${roomName}/`;
+        // }
+
+        // function rejectInvite() {
+        //   console.log("❌ Invite rejected.");
+        //   //const modal = document.getElementById("invite-modal");
+        //   if (modalInvite) modalInvite.classList.add("hidden");
+        // }
+
+        if (acceptBtn && declineBtn) {
+          acceptBtn.onclick = () => {
+            const room = document.getElementById("invite-room").textContent;
+            window.location.href = `/meeting/${room}/`;
+          };
+
+          declineBtn.onclick = () => {
+            document.getElementById("invite-modal").classList.add("hidden");
+          };
+        } else {
+          console.warn("❌ Invite buttons not found in DOM.");
+        }
+
+
+      }
+
       function getCSRFToken() {
         return document.cookie.split("; ").find(row => row.startsWith("csrftoken="))?.split("=")[1];
       }
