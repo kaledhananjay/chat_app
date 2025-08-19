@@ -8,7 +8,7 @@ import json
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
-from .models import CallSession, Chat, MeetingInvite
+from .models import CallSession, Chat, MeetingInvite, User
 from .serializers import CallOfferSerializer, CallAnswerSerializer
 from rest_framework.permissions import IsAuthenticated
 from deep_translator import GoogleTranslator
@@ -20,6 +20,8 @@ import os, uuid, subprocess
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.contrib.auth import get_user_model
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 
 @login_required
@@ -317,14 +319,6 @@ def meeting_room(request, room_name, user_id):
         "username": request.user.username
     })
 
-# from django.views.decorators.csrf import csrf_exempt
-# from django.contrib.auth.decorators import login_required
-# from django.http import JsonResponse
-# from django.contrib.auth import get_user_model
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
-# import json
-
 @csrf_exempt  # Optional: remove if using CSRF tokens via fetch
 @login_required
 def send_meeting_invite(request):
@@ -357,11 +351,22 @@ def send_meeting_invite(request):
         async_to_sync(channel_layer.group_send)(
             f"user_{target_user.id}",
             {
-                "type": "receive_invite",
-                "room": room,
-                "from": sender.username
+                "type": "send_notification",  # ✅ Matches consumer method
+                "payload": {
+                    "type": "receive_invite",  # ✅ Matches frontend listener
+                    "room": room,
+                    "from": sender.username
+                }
             }
         )
+        # async_to_sync(channel_layer.group_send)(
+        #     f"user_{target_user.id}",
+        #     {
+        #         "type": "receive_invite",
+        #         "room": room,
+        #         "from": sender.username
+        #     }
+        # )
         print("Invite sent via Channels")
         return JsonResponse({"status": "invite sent", "room": room})
     except Exception as e:
@@ -387,6 +392,8 @@ def meeting_room_group(request, room_name):
 @login_required
 def meeting_room_direct(request, room_name, target_id):
     print("🔥 meeting_room_direct triggered")
+    print("User Name : ",target_id )
+    print("request.user.id : ",request.user.id )
     all_users = User.objects.exclude(id=request.user.id)
     target_user = get_object_or_404(User, id=target_id)
     return render(request, "meeting.html", {
