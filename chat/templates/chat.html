@@ -313,12 +313,12 @@
         const data = JSON.parse(event.data);
         //console.log("📨 Notification received:", data);
 
-        if (data.type === "receive_invite") {
-          showInviteModal({
-            inviterId: data.from,
-            roomName: data.room
-          });
-        }
+        // if (data.type === "receive_invite") {
+        //   showInviteModal({
+        //     inviterId: data.from,
+        //     roomName: data.room
+        //   });
+        // }
       };
 
       function showInviteModal(roomName, inviterId) {

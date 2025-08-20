@@ -270,9 +270,7 @@
             const socket = new WebSocket(`ws://${window.location.host}/ws/meeting/${roomName}/`);
             const notificationSocket = new WebSocket(`ws://${window.location.host}/ws/notifications/`);
             const meetingSocket = new WebSocket(`ws://${window.location.host}/ws/meeting/{{ room_name }}/`);
-            const currentUserId = "{{ current_user_id }}";
-
-
+            const currentUserId = "{{ user_id }}";
 
             if (!startCallBtn) {
                 console.warn("⚠️ startCallBtn not found in DOM");
@@ -311,7 +309,9 @@
 
             meetingSocket.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                console.log("📥 Message received:", data);
+                console.log("📥  meetingSocket.onmessage Message received:", data);
+                // console.log("🔗 data.userId:", data.userId);
+                // console.log("🔗 currentUserId:", currentUserId);
                 if (data.type === "voice_joined" && data.userId !== currentUserId) {
                     console.log("🔗 New participant joined:", data.userId);
 
@@ -384,18 +384,17 @@
 
             notificationSocket.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-
-
                 console.log("📨 Notification received:", data);
 
                 if (data.type === "receive_invite") {
+                    console.log(`📥 Meeting invite received from 1`);
                     showInviteModal({
                         sender: data.from,
                         room: data.room
                     });
                 }
 
-                if (data.type === "participant.update") {
+                else if (data.type === "participant.update") {
                     console.log("data.type:", data.type);
                     console.log("👥 Notification Received participant list:", data.participants);
                     renderParticipantList(data.participants);
@@ -408,8 +407,6 @@
 
                 const roomName = document.getElementById("meeting-container").dataset.roomName;
                 const username = document.getElementById("meeting-container").dataset.userId;
-
-                console.log("📤 Sending join:", { type: "join", user_id: username, room: roomName });
 
                 // Send join event
                 socket.send(JSON.stringify({
@@ -426,18 +423,6 @@
             socket.onclose = (event) => {
                 console.warn("⚠️ WebSocket closed:", event);
             };
-
-
-            // document.getElementById("startCallBtn").addEventListener("click", async () => {
-            //     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-            //     //document.getElementById("startCallBtn").style.display = "none";
-            //     //leaveCallBtn.style.display = "inline-block";
-            //     //muteToggleBtnstyle.display = "inline-block";
-
-            //     socket.send(JSON.stringify({ type: "ready", sender: username }));
-            //     addParticipant(username);
-            // });
 
             startCallBtn.addEventListener("click", async () => {
                 try {
@@ -462,14 +447,12 @@
                 }
             });
 
-
-
             if (leaveCallBtn) {
                 Object.values(peers).forEach(peer => peer.close());
                 for (const userId in peers) {
                     const audio = document.getElementById(`audio-${userId}`);
                     if (audio) audio.remove();
-                    removeParticipant(userId);
+                    //removeParticipant(userId);
                 }
                 if (localStream) {
                     localStream.getTracks().forEach(track => track.stop());
@@ -478,7 +461,7 @@
                 document.getElementById("startCallBtn").style.display = "inline-block";
                 //leaveCallBtn.style.display = "none";
                 //muteToggleBtn.style.display = "none";
-                removeParticipant(username);
+                //removeParticipant(username);
             } else {
                 console.warn("⚠️ leaveCallBtn not found in DOM");
             }
@@ -505,9 +488,8 @@
             socket.onmessage = (event) => {
                 //console.log("Socket readyState:", socket.readyState);
                 const data = JSON.parse(event.data);
-                console.log("🔍 WebSocket message received:", data.type);
+                console.log("🔍 socket.onmessage message received:", data.type);
                 const currentUserId = document.getElementById("meeting-container").dataset.userId;
-                console.log(" CCCC : ", currentUserId)
                 if (data.type === "chat") {
                     const chatBox = document.getElementById("chatMessages");
                     const msg = document.createElement("div");
@@ -526,7 +508,7 @@
                 else if (data.type === "receive_invite") {
                     console.log(`📨 Invite from ${data.from} to join room ${data.room}`);
                     //showInviteModal(data.room, data.from);
-                    console.log("📨 Invite received:", data);
+                    console.log(`📥 Meeting invite received from 3`);
                     showInviteModal({
                         sender: data.from,
                         room: data.room
@@ -546,7 +528,7 @@
                     }
                 }
                 else if (data.type === "invite") {
-                    //console.log(`📥 Meeting invite received from ${data.sender} for room ${data.room}`);
+                    console.log(`📥 Meeting invite received from 4`);
                     showInviteModal({
                         id: data.invite_id,
                         sender: data.sender,
@@ -556,6 +538,7 @@
             };
 
             function showInviteModal(roomName, inviterId) {
+                console.log(`📥 Meeting invite received from qq`);
                 const modal = document.getElementById("invite-modal");
                 document.getElementById("inviter-name").textContent = inviterId;
                 document.getElementById("invite-room").textContent = roomName;
@@ -591,6 +574,7 @@
             }
 
             function showInviteModal(invite) {
+                console.log(`📥 Meeting invite received from XX`);
                 document.getElementById("inviter-name").textContent = invite.sender;
                 document.getElementById("invite-room").textContent = invite.room;
 
@@ -796,8 +780,6 @@
         }
 
         function removeParticipant(name) {
-            console.log("participants:", participants);
-            console.log("typeof participants:", typeof participants);
             participants.delete(name);
             const li = document.getElementById(`participant-${name}`);
             if (li) li.remove();

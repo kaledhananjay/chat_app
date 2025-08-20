@@ -378,9 +378,9 @@ def send_meeting_invite(request):
         
 @login_required
 def meeting_room_group(request, room_name):
-    print("🔥 meeting_room_group triggered")
+    print("🔥 meeting_room_group triggered yy")
     all_users = User.objects.exclude(id=request.user.id)
-    print("✅ all_users:", list(all_users))
+    print("✅ user_id", request.user.id)
     return render(request, "meeting.html", {
         "room_name": room_name,
         "username": request.user.username,
@@ -391,7 +391,7 @@ def meeting_room_group(request, room_name):
 
 @login_required
 def meeting_room_direct(request, room_name, target_id):
-    print("🔥 meeting_room_direct triggered")
+    print("🔥 meeting_room_direct triggered XX")
     print("User Name : ",target_id )
     print("request.user.id : ",request.user.id )
     all_users = User.objects.exclude(id=request.user.id)
