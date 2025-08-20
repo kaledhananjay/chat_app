@@ -290,8 +290,6 @@
       const acceptBtn = document.getElementById("accept-invite-btn");
       const declineBtn = document.getElementById("decline-invite-btn");
 
-
-
       let localStream = null;
       let latestOffer = null;
       let currentCallId = null;
@@ -302,8 +300,8 @@
       let tracks = null;
       let testStream = null;
       let textToBeSent = null;
+      let recorder = null;
       let receiver = "{{ receiver.id }}";
-
 
       notificationSocket.onopen = () => {
         console.log("🔔 Notification WebSocket connected");
@@ -311,14 +309,14 @@
 
       notificationSocket.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        //console.log("📨 Notification received:", data);
+        console.log("📨 notificationSocket.onmessage data.type :", data.type);
 
-        // if (data.type === "receive_invite") {
-        //   showInviteModal({
-        //     inviterId: data.from,
-        //     roomName: data.room
-        //   });
-        // }
+        if (data.type === "receive_invite") {
+          showInviteModal({
+            inviterId: data.from,
+            roomName: data.room
+          });
+        }
       };
 
       function showInviteModal(roomName, inviterId) {
@@ -339,17 +337,6 @@
 
         modal.classList.remove("hidden");
 
-        // function acceptInvite(roomName) {
-        //   console.log("✅ Invite accepted. Redirecting to room:", roomName);
-        //   window.location.href = `/meeting/${roomName}/`;
-        // }
-
-        // function rejectInvite() {
-        //   console.log("❌ Invite rejected.");
-        //   //const modal = document.getElementById("invite-modal");
-        //   if (modalInvite) modalInvite.classList.add("hidden");
-        // }
-
         if (acceptBtn && declineBtn) {
           acceptBtn.onclick = () => {
             const room = document.getElementById("invite-room").textContent;
@@ -362,8 +349,6 @@
         } else {
           console.warn("❌ Invite buttons not found in DOM.");
         }
-
-
       }
 
       function getCSRFToken() {
@@ -563,8 +548,6 @@
         }
       }, 5000);
 
-      let recorder = null;
-
       async function startRecording() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const mimeType = [
@@ -674,6 +657,7 @@
       document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("sendMessage").addEventListener("click", saveMessageAJAX);
       });
+      
       function sendTranlatedtextToUser() {
         //console.log("Translated XXX:", textToBeSent);
         let userId = "{{ receiver.id }}"
@@ -770,40 +754,16 @@
 
     document.getElementById("startMeetingBtn").addEventListener("click", () => {
       const roomName = `room_${Date.now()}`;
-      const receiverId = "{{ receiver.id }}";
+      // const receiverId = "{{ receiver.id }}";
 
-      fetch("/api/send-meeting-invite/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ room: roomName, target: receiverId })
-      }).then(() => {
+      // fetch("/api/send-meeting-invite/", {
+      //   method: "POST",
+      //   headers: { "Content-Type": "application/json" },
+      //   body: JSON.stringify({ room: roomName, target: receiverId })
+      // }).then(() => {
         window.location.href = `/meeting/${roomName}/`;
-      });
+      //});
     });
-    // document.getElementById("startMeetingBtn").addEventListener("click", () => {
-    //   // You can generate a room name based on timestamp or user ID
-    //   const roomName = `room_${Date.now()}`;  // Or use a UUID or group ID
-    //   const receiverId = "{{ receiver.id }}";  // From Django context
-    //   const senderName = "{{ request.user.username }}";
-
-    //   const chatSocket = new WebSocket(
-    //     `ws://${window.location.host}/ws/chat/${receiverId}/`
-    //   );
-    //   // Send invite via WebSocket
-    //   chatSocket.onopen = () => {
-    //     chatSocket.send(JSON.stringify({
-    //       type: "meeting_invite",
-    //       room: roomName,
-    //       sender: senderName,
-    //       target: receiverId
-    //     }));
-
-    //     // Redirect initiator to meeting room
-    //     window.location.href = `/meeting/${roomName}/`;
-    //   };
-    // });
-
   </script>
 </body>
-
 </html>
