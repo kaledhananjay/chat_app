@@ -2,21 +2,22 @@ from pkgutil import get_data
 from channels.generic.websocket import AsyncWebsocketConsumer
 import json
 from django.core.cache import cache
+from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 # Global in-memory store for participants per room
 ROOM_PARTICIPANTS = {}
 
-class MeetingConsumer(AsyncWebsocketConsumer):
+class MeetingConsumer(AsyncJsonWebsocketConsumer):
+#class MeetingConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        print("🧠 MeetingConsumer connected for:", self.scope["path"])
         self.room_name = self.scope["url_route"]["kwargs"]["room_name"]
         self.user = self.scope["user"]
         self.user_group = f"user_{self.user.id}"
         self.room_group_name = f"chat_{self.room_name}"
-        print("Position 1.")
         if self.user.is_anonymous:
             await self.close()
             return
-        print("Position 2.")
         await self.channel_layer.group_add(self.user_group, self.channel_name)
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
@@ -35,6 +36,9 @@ class MeetingConsumer(AsyncWebsocketConsumer):
         
         await self.send_participant_list()
 
+    # async def receive(self, text_data):
+    #     print("📩 Raw message received:", text_data)
+    
     async def disconnect(self, close_code):
         if hasattr(self, "room_group_name"):
             await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
@@ -69,62 +73,6 @@ class MeetingConsumer(AsyncWebsocketConsumer):
             "participants": participants
         }))
 
-    # async def receive(self, text_data):
-    #     print("🔍 Incoming WebSocket message:", text_data)
-    #     data = json.loads(text_data)
-        
-    #     msg_type = data.get("type")
-    #     if data["type"] == "join":
-    #         await self.channel_layer.group_add(
-    #             self.room_group_name,
-    #             self.channel_name
-    #         )
-    #         # ✅ Broadcast a transformed message
-    #         await self.channel_layer.group_send(
-    #             self.room_group_name,
-    #             {
-    #                 "type": "user_joined",
-    #                 "username": data.get("user_id", "anonymous")
-    #             }
-    #         )
-    #     elif msg_type == "invite":
-    #         print("MeetingConsumer-receive ", msg_type)
-    #         target_user_id = data["target_user_id"]
-    #         room = data["room"]
-    #         sender = self.scope["user"].username
-
-    #         await self.channel_layer.group_send(
-    #             f"user_{target_user_id}",
-    #             {
-    #                 "type": "receive_invite",
-    #                 "room": room,
-    #                 "from": sender
-    #             }
-    #         )
-    #         print(f"📤 Sent invite to user_{target_user_id} for room {room}")
-    #     else:
-    #         # ✅ Forward other messages (e.g., chat, signal)
-    #         await self.channel_layer.group_send(
-    #             self.room_group_name,
-    #             {
-    #                 "type": "signal_message",
-    #                 "message": text_data
-    #             }
-    #         )
-    #     if data["type"] == "mic.status":
-    #         await self.channel_layer.group_send(
-    #             self.room_group_name,
-    #             {
-    #                 "type": "mic_status",
-    #                 "user_id": data["user_id"],
-    #                 "mic_on": data["mic_on"],
-    #                 "username": self.scope["user"].username,
-    #             }
-    #         )
-    #     if not hasattr(self, "room_group_name"):
-    #         print("⚠️ Tried to send before joining a room")
-    #         return
-            
     async def mic_status(self, event):
         await self.send(text_data=json.dumps({
             "type": "mic.status",
@@ -159,20 +107,23 @@ class MeetingConsumer(AsyncWebsocketConsumer):
             "room": event["room"],
             "from": event["from"]
         }))
-        
+
     async def voice_offer(self, event):
+        print("📤 Sending voice.offer to frontend:", event)
+
         await self.send(text_data=json.dumps({
             "type": "voice.offer",
             "from": event["from"],
+            "to": event["to"],
             "sdp": event["sdp"]
         }))
-
+                
     async def receive_json(self, content):
-        msg_type = content.get("type")
-        print("✅ receive_json triggered with:", content)
-        if msg_type == "voice.ready":
-            user_id = self.scope["user"].id  #content.get("userId") or 
-            print("📡 voice.ready received from:", user_id)
+        msg_type = content["type"]
+        #print("✅ receive_json triggered with:", content)
+        if msg_type == "voice.ready" or msg_type == "join":
+            user_id = self.scope["user"].id
+            #print("📡 voice.ready received from:", user_id)
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
@@ -181,14 +132,16 @@ class MeetingConsumer(AsyncWebsocketConsumer):
                 }
             )
         elif msg_type == "voice.offer":
+            print("📡 voice.offer received from:", content["from"], "to:", content["to"])
             await self.channel_layer.group_send(
-                f"user_{content["to"]}",
+                self.room_group_name,
                 {
-                    "type": "voice_offer",
+                    "type": "voice_offer", 
                     "from": content["from"],
+                    "to": content["to"],
                     "sdp": content["sdp"]
-                }
-            ) 
+                   }
+            )
         elif msg_type  == "voice.answer":
             await self.channel_layer.group_send(
                 f"user_{content["to"]}",
@@ -200,10 +153,11 @@ class MeetingConsumer(AsyncWebsocketConsumer):
             )
         elif msg_type  == "voice.ice":
             await self.channel_layer.group_send(
-                f"user_{content["to"]}",
+                self.room_group_name,
                 {
-                    "type": "voice_ice",
+                    "type": "voice_ice",  # This must match the method name above
                     "from": content["from"],
+                    "to": content["to"],
                     "candidate": content["candidate"]
                 }
             )
@@ -228,12 +182,13 @@ class MeetingConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             "type": "voice.ice",
             "from": event["from"],
+            "to": event["to"],
             "candidate": event["candidate"]
         }))
         
 class FallbackConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        #print(f"⚠️ FallbackConsumer triggered for path: {self.scope['path']}")
+        print(f"⚠️ FallbackConsumer triggered for path: {self.scope['path']}")
         await self.close()
 
 class NotificationConsumer(AsyncWebsocketConsumer):

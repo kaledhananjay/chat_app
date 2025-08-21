@@ -271,6 +271,9 @@
             const notificationSocket = new WebSocket(`ws://${window.location.host}/ws/notifications/`);
             const meetingSocket = new WebSocket(`ws://${window.location.host}/ws/meeting/{{ room_name }}/`);
             const currentUserId = "{{ user_id }}";
+            const peerConnections = {};
+            let localStream = null;
+
 
             if (!startCallBtn) {
                 console.warn("⚠️ startCallBtn not found in DOM");
@@ -284,13 +287,6 @@
                     socket.close(); // Disconnect WebSocket
                     notificationSocket.close();
                     window.location.href = `/chat/{{cuserId}}/`; // Redirect
-
-                    // const targetUserId = "{{ target_user_id }}";
-                    // if (!targetUserId) {
-                    //     console.warn("⚠️ targetUserId is blank — check template context");
-                    // }
-
-                    // window.location.href = `/chat/${targetUserId}/`;
                 });
             } else {
                 console.warn("⚠️ leaveCallBtn not found in DOM");
@@ -298,7 +294,6 @@
 
             roomNameN = roomName
             const peers = {};
-            let localStream = null;
             let isMuted = false;
             const participants = new Set();
             const userId = window.location.pathname.split("/")[3];   // "2"
@@ -307,73 +302,43 @@
                 console.log("✅ Connected to meeting room");
             };
 
-            meetingSocket.onmessage = (event) => {
+            // WebSocket message handler
+            meetingSocket.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
-                console.log("📥  meetingSocket.onmessage Message received:", data);
-                // console.log("🔗 data.userId:", data.userId);
-                // console.log("🔗 currentUserId:", currentUserId);
+                console.log("📥 meetingSocket.onmessage Message received:", data);
+
                 if (data.type === "voice_joined" && data.userId !== currentUserId) {
-                    console.log("🔗 New participant joined:", data.userId);
-
-                    (async () => {
-                        if (peerConnections[data.userId]) return;
-
-                        const pc = new RTCPeerConnection();
-                        peerConnections[data.userId] = pc;
-
-                        if (!localStream) {
-                            console.warn("⚠️ localStream is not available");
-                            return;
-                        }
-
-                        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-                        pc.ontrack = (event) => {
-                            const remoteStream = event.streams[0];
-                            const remoteAudio = document.createElement("audio");
-                            remoteAudio.srcObject = remoteStream;
-                            remoteAudio.autoplay = true;
-                            remoteAudio.muted = false;
-                            document.body.appendChild(remoteAudio);
-                        };
-
-                        pc.onicecandidate = (event) => {
-                            if (event.candidate) {
-                                meetingSocket.send(JSON.stringify({
-                                    type: "voice.ice",
-                                    to: data.userId,
-                                    from: currentUserId,
-                                    candidate: event.candidate
-                                }));
-                            }
-                        };
-
-                        const offer = await pc.createOffer();
-                        await pc.setLocalDescription(offer);
-
-                        meetingSocket.send(JSON.stringify({
-                            type: "voice.offer",
-                            to: data.userId,
-                            from: currentUserId,
-                            sdp: offer.sdp
-                        }));
-
-                        if (data.type === "voice.answer") {
-                            console.log("📥 Received voice answer from", data.from);
-
-                            const pc = peerConnections[data.from];
-                            if (!pc) {
-                                console.warn("⚠️ No peer connection found for", data.from);
-                                return;
-                            }
-
-                            await pc.setRemoteDescription(new RTCSessionDescription({
-                                type: "answer",
-                                sdp: data.sdp
-                            }));
-                        }
-
-                    })();
+                    if (!localStream) {
+                        console.warn("⚠️ localStream not initialized yet. Skipping peer setup.");
+                        return;
+                    }
+                    await createPeerConnection(data.userId, true);
+                }
+                else if (data.type === "voice.offer" && data.to === currentUserId) {
+                    if (!localStream) {
+                        console.warn("⚠️ localStream not initialized yet. Skipping peer setup.");
+                        return;
+                    }
+                    await createPeerConnection(data.from, false, data.sdp);
+                }
+                else if (data.type === "voice.answer") {
+                    const pc = peerConnections[data.from];
+                    if (!pc) {
+                        console.warn("⚠️ No peer connection found for", data.from);
+                        return;
+                    }
+                    await pc.setRemoteDescription(new RTCSessionDescription({
+                        type: "answer",
+                        sdp: data.sdp
+                    }));
+                }
+                else if (data.type === "voice.ice" && data.to === currentUserId) {
+                    const pc = peerConnections[data.from];
+                    if (!pc) {
+                        console.warn("⚠️ No peer connection found for ICE from", data.from);
+                        return;
+                    }
+                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
                 }
             };
 
@@ -429,13 +394,13 @@
                     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     console.log("🎙️ Mic access granted");
 
-                    // Attach local stream to your audio UI (optional)
-                    const localAudio = document.createElement("audio");
-                    localAudio.srcObject = localStream;
-                    localAudio.autoplay = true;
-                    localAudio.muted = true; // prevent echo
-                    document.body.appendChild(localAudio);
-
+                    // // Attach local stream to your audio UI (optional)
+                    // const localAudio = document.createElement("audio");
+                    // localAudio.srcObject = localStream;
+                    // localAudio.autoplay = true;
+                    // localAudio.muted = true; // prevent echo
+                    // document.body.appendChild(localAudio);
+                    // console.log("🎙️ currentUserId : ", currentUserId);
                     // Notify backend you're ready to join mesh
                     meetingSocket.send(JSON.stringify({
                         type: "voice.ready",
@@ -719,7 +684,9 @@
             }, 500);
         }
 
-        function createPeer(targetUser) {
+        async function setupPeerConnection(targetUser, isOfferer = false, remoteSDP = null) {
+            if (peers[targetUser]) return peers[targetUser];
+
             const peer = new RTCPeerConnection();
             peers[targetUser] = peer;
 
@@ -742,6 +709,35 @@
                 const remoteStream = event.streams[0];
                 attachRemoteAudio(targetUser, remoteStream);
             };
+
+            if (isOfferer) {
+                const offer = await peer.createOffer();
+                await peer.setLocalDescription(offer);
+
+                socket.send(JSON.stringify({
+                    type: "offer",
+                    sdp: offer.sdp,
+                    sender: username,
+                    target: targetUser
+                }));
+            }
+
+            if (remoteSDP) {
+                await peer.setRemoteDescription(new RTCSessionDescription({
+                    type: "offer",
+                    sdp: remoteSDP
+                }));
+
+                const answer = await peer.createAnswer();
+                await peer.setLocalDescription(answer);
+
+                socket.send(JSON.stringify({
+                    type: "answer",
+                    sdp: answer.sdp,
+                    sender: username,
+                    target: targetUser
+                }));
+            }
 
             return peer;
         }
