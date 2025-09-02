@@ -241,7 +241,7 @@
   <script>
     function loadChatHistory() {
       const receiver = "{{ receiver.id }}";
-      console.log('After Call : ', receiver)
+      //console.log('After Call : ', receiver)
       fetch(`/chat/load/?receiver=${receiver}`, { cache: "no-store" })
         .then(response => response.json())
         .then(data => {
@@ -657,7 +657,7 @@
       document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("sendMessage").addEventListener("click", saveMessageAJAX);
       });
-      
+
       function sendTranlatedtextToUser() {
         //console.log("Translated XXX:", textToBeSent);
         let userId = "{{ receiver.id }}"
@@ -753,17 +753,19 @@
     }
 
     document.getElementById("startMeetingBtn").addEventListener("click", () => {
+      //startGroupCall(); // This is fine because it's not using await here
       const roomName = `room_${Date.now()}`;
-      // const receiverId = "{{ receiver.id }}";
-
-      // fetch("/api/send-meeting-invite/", {
-      //   method: "POST",
-      //   headers: { "Content-Type": "application/json" },
-      //   body: JSON.stringify({ room: roomName, target: receiverId })
-      // }).then(() => {
+      const receiverId = "{{ receiver.id }}";
+      const vtag = "chat"
+      fetch("/api/send-meeting-invite/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room: roomName, target: receiverId, tag:vtag })
+      }).then(() => {
         window.location.href = `/meeting/${roomName}/`;
-      //});
+      });
     });
   </script>
 </body>
+
 </html>

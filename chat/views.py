@@ -313,11 +313,20 @@ def save_message_view(request):
 @login_required
 def meeting_room(request, room_name, user_id):
     invited_user = get_object_or_404(User, id=user_id)
+    invite = get_object_or_404(MeetingInvite, room=room_name)
+    
     return render(request, "meeting.html", {
-        "room_name": room_name,
-        #"username": invited_user.username 
-        "username": request.user.username
-    })
+            "room_name": room_name,
+            "username": request.user.username,
+            "current_user_id": request.user.id,
+            "room_creator_id": invite.sender.id  # ✅ this is the room creator
+        })
+
+    # return render(request, "meeting.html", {
+    #     "room_name": room_name,
+    #     #"username": invited_user.username 
+    #     "username": request.user.username
+    # })
 
 @csrf_exempt  # Optional: remove if using CSRF tokens via fetch
 @login_required
@@ -326,48 +335,43 @@ def send_meeting_invite(request):
         return JsonResponse({"error": "Invalid method"}, status=405)
 
     try:
+        print("!!!!!!!!!!!!!!!!!!send_meeting_invite")
         data = json.loads(request.body)
         room = data.get("room")
         target_id = data.get("target")
         sender = request.user
+        tag = data.get("tag")
+        print("Reveived tag as: ", tag )
+        if tag == "chat":
+            if not room or not target_id:
+                return JsonResponse({"error": "Missing room or target"}, status=400)
 
-        if not room or not target_id:
-            return JsonResponse({"error": "Missing room or target"}, status=400)
+            User = get_user_model()
+            try:
+                target_user = User.objects.get(id=target_id)
+            except User.DoesNotExist:
+                return JsonResponse({"error": "Target user not found"}, status=404)
 
-        User = get_user_model()
-        try:
-            target_user = User.objects.get(id=target_id)
-        except User.DoesNotExist:
-            return JsonResponse({"error": "Target user not found"}, status=404)
+            # ✅ Save invite to DB
+            MeetingInvite.objects.create(sender=sender, target=target_user, room=room)
 
-        # ✅ Save invite to DB
-        MeetingInvite.objects.create(sender=sender, target=target_user, room=room)
-
-        print(f"📨 Meeting invite from {sender.username} to {target_user.username} for room {room}")
-
-        # ✅ Send WebSocket notification to invited user
-        channel_layer = get_channel_layer()
-        print(f"Sending invite to user_{target_user.id}")
-        async_to_sync(channel_layer.group_send)(
-            f"user_{target_user.id}",
-            {
-                "type": "send_notification",  # ✅ Matches consumer method
-                "payload": {
-                    "type": "receive_invite",  # ✅ Matches frontend listener
-                    "room": room,
-                    "from": sender.username
+            print(f"📨 Meeting invite from {sender.username} to {target_user.username} for room {room}")
+        elif tag == "meet":
+            #✅ Send WebSocket notification to invited user
+            channel_layer = get_channel_layer()
+            print(f"Sending invite to user_{target_user.id}")
+            async_to_sync(channel_layer.group_send)(
+                f"user_{target_user.id}",
+                {
+                    "type": "send_notification",  # ✅ Matches consumer method
+                    "payload": {
+                        "type": "receive_invite",  # ✅ Matches frontend listener
+                        "room": room,
+                        "from": sender.username
+                    }
                 }
-            }
-        )
-        # async_to_sync(channel_layer.group_send)(
-        #     f"user_{target_user.id}",
-        #     {
-        #         "type": "receive_invite",
-        #         "room": room,
-        #         "from": sender.username
-        #     }
-        # )
-        print("Invite sent via Channels")
+            )
+            print("Invite sent via Channels")
         return JsonResponse({"status": "invite sent", "room": room})
     except Exception as e:
         print("❌ Error sending invite:", str(e))
@@ -396,13 +400,27 @@ def meeting_room_direct(request, room_name, target_id):
     print("request.user.id : ",request.user.id )
     all_users = User.objects.exclude(id=request.user.id)
     target_user = get_object_or_404(User, id=target_id)
+    
+    invite = get_object_or_404(MeetingInvite, room=room_name)
+    room_creator_id = invite.sender.id
+
     return render(request, "meeting.html", {
         "room_name": room_name,
         "username": request.user.username,
         "user_id": request.user.id,
         "target_user": target_user,
         "all_users": all_users,
+        "room_creator_id": room_creator_id  # ✅ Add this
     })
+
+
+    # return render(request, "meeting.html", {
+    #     "room_name": room_name,
+    #     "username": request.user.username,
+    #     "user_id": request.user.id,
+    #     "target_user": target_user,
+    #     "all_users": all_users,
+    # })
 
 async def receive(self, text_data):
     data = json.loads(text_data)
@@ -473,3 +491,35 @@ def respond_to_invite(request):
             return JsonResponse({"success": True})
         except MeetingInvite.DoesNotExist:
             return JsonResponse({"error": "Invite not found"}, status=404)
+
+@login_required
+def get_meeting_invite_by_room(request, room_name):
+    try:
+        print("In get_meeting_invite_by_room")
+        invite = get_object_or_404(MeetingInvite, room=room_name)
+
+        data = {
+            "room": invite.room,
+            "sender_id": invite.sender.id,
+            "sender_username": invite.sender.username,
+            "target_id": invite.target.id,
+            "target_username": invite.target.username,
+            "timestamp": invite.timestamp.isoformat()
+        }
+        print("Out get_meeting_invite_by_room")
+        return JsonResponse({"status": "ok", "invite": data})
+
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=400)
+    
+@login_required
+def create_meeting_room(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid method"}, status=405)
+
+    try:
+        room = MeetingInvite.objects.create(created_by=request.user)
+        return JsonResponse({"room": room.id})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+

@@ -243,17 +243,7 @@
             </div>
         </div>
     </div>
-    <!-- Meeting room UI will be injected here -->
-    <!-- <div id="invite-modal" class="modal hidden">
-        <div class="modal-content">
-            <p>
-                <strong>User <span id="inviter-name"></span></strong> invited you to join room
-                <strong><span id="invite-room"></span></strong>.
-            </p>
-            <button id="accept-invite-btn">Join</button>
-            <button id="decline-invite-btn">Decline</button>
-        </div>
-    </div> -->
+    <div id="audioContainer"></div>
     <script>
         window.addEventListener("beforeunload", () => {
             console.log("🔁 Page is about to refresh");
@@ -270,10 +260,124 @@
             const socket = new WebSocket(`ws://${window.location.host}/ws/meeting/${roomName}/`);
             const notificationSocket = new WebSocket(`ws://${window.location.host}/ws/notifications/`);
             const meetingSocket = new WebSocket(`ws://${window.location.host}/ws/meeting/{{ room_name }}/`);
-            const currentUserId = "{{ user_id }}";
+            //const currentUserId = "{{ user_id }}";
             const peerConnections = {};
+            const pendingOutgoingPeers = []; // for caller-side offers
+            const pendingIncomingOffers = []; // for callee-side responses
             let localStream = null;
+            const peers = {};
+            roomNameN = roomName
+            let isMuted = false;
+            const participants = new Set();
+            const userId = window.location.pathname.split("/")[3];   // "2"
 
+            let currentUserId;
+            let roomCreatorId;
+
+            let isRoomCreator;
+            console.log("isRoomCreator:", isRoomCreator);
+
+
+            //const currentUserId = "{{ request.user.id }}";
+
+            console.log("currentUserId:", currentUserId);
+            console.log("roomCreatorId:", roomCreatorId);
+            async function setupPeerConnection(targetUser, isOfferer = false, remoteSDP = null) {
+                if (peers[targetUser]) return peers[targetUser];
+
+                const peer = new RTCPeerConnection();
+                peers[targetUser] = peer;
+
+                // Attach local media tracks
+                if (localStream) {
+                    //console.log("🎙️ Attaching localStream to peer:", targetUser);
+                    localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+                    //console.log("🎙️ localStream tracks:", localStream.getAudioTracks());
+                }
+
+                // Handle ICE candidates
+                peer.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        if (meetingSocket.readyState === WebSocket.OPEN) {
+                            console.log("❄️ Sending ICE candidate to:", targetUser);
+                            meetingSocket.send(JSON.stringify({
+                                type: "voice.ice",
+                                candidate: event.candidate,
+                                sender: username,
+                                target: targetUser
+                            }));
+                        } else {
+                            console.warn("⚠️ WebSocket not open. Skipping send.");
+                        }
+
+                    }
+                };
+
+                // Handle incoming media
+                peer.ontrack = (event) => {
+                    const remoteStream = event.streams[0];
+                    console.log("🔊 Remote stream received from", targetUser, ":", remoteStream);
+                    attachRemoteAudio(targetUser, remoteStream);
+                };
+
+                // Monitor connection state
+                peer.onconnectionstatechange = () => {
+                    console.log("🔁 Connection state with", targetUser, ":", peer.connectionState);
+                };
+
+                // Caller creates and sends offer
+                if (isOfferer) {
+                    try {
+                        console.log("📤 Creating and sending SDP offer to", targetUser);
+                        const offer = await peer.createOffer();
+                        await peer.setLocalDescription(offer);
+                        if (meetingSocket.readyState === WebSocket.OPEN) {
+                            meetingSocket.send(JSON.stringify({
+                                type: "voice.offer",
+                                to: targetUser,
+                                from: currentUserId,
+                                sdp: offer.sdp
+                            }));
+                        } else {
+                            console.warn("⚠️ WebSocket not open. Skipping send.");
+                        }
+
+                        console.log("📤 Sent voice.offer to backend:", targetUser);
+                    } catch (err) {
+                        console.error("❌ Failed to create/send offer to", targetUser, err);
+                    }
+                }
+
+                // Callee receives offer and sends answer
+                if (remoteSDP) {
+                    try {
+                        console.log("📥 Setting remote SDP from offer for", targetUser);
+                        await peer.setRemoteDescription(new RTCSessionDescription({
+                            type: "offer",
+                            sdp: remoteSDP
+                        }));
+
+                        const answer = await peer.createAnswer();
+                        await peer.setLocalDescription(answer);
+                        if (meetingSocket.readyState === WebSocket.OPEN) {
+                            meetingSocket.send(JSON.stringify({
+                                type: "voice.answer",
+                                sdp: answer.sdp,
+                                sender: username,
+                                target: targetUser
+                            }));
+                        } else {
+                            console.warn("⚠️ WebSocket not open. Skipping send.");
+                        }
+
+                        console.log("📤 Sent voice.answer to backend:", targetUser);
+                    } catch (err) {
+                        console.error("❌ Failed to process remote SDP or send answer to", targetUser, err);
+                    }
+                }
+
+                return peer;
+            }
 
             if (!startCallBtn) {
                 console.warn("⚠️ startCallBtn not found in DOM");
@@ -281,6 +385,7 @@
             }
 
             console.log("✅ DOM fully loaded");
+            //console.log("currentUserId accept-invite-btn : ", cuserId)
             leaveCallBtn = document.getElementById("leaveBtn");
             if (leaveCallBtn) {
                 leaveCallBtn.addEventListener("click", () => {
@@ -292,34 +397,34 @@
                 console.warn("⚠️ leaveCallBtn not found in DOM");
             }
 
-            roomNameN = roomName
-            const peers = {};
-            let isMuted = false;
-            const participants = new Set();
-            const userId = window.location.pathname.split("/")[3];   // "2"
+
 
             meetingSocket.onopen = () => {
-                console.log("✅ Connected to meeting room");
+                console.log("✅ Connected to meetingSocket for meeting room");
             };
 
             // WebSocket message handler
             meetingSocket.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
-                console.log("📥 meetingSocket.onmessage Message received:", data);
-
-                if (data.type === "voice_joined" && data.userId !== currentUserId) {
-                    if (!localStream) {
-                        console.warn("⚠️ localStream not initialized yet. Skipping peer setup.");
+                console.log("📥 meetingSocket.onmessage Message received:", roomName);
+                fetchMeetingInvite(roomName)
+                if (data.type === "voice_joined" && data.userId !== currentUserId && isRoomCreator) {
+                    //if (!localStream) {
+                    if (!pendingOutgoingPeers.includes(data.userId)) {
+                        console.warn("⚠️ localStream not initialized yet. Queuing peer setup for:", data.userId);
+                        //pendingOutgoingPeers.push({ from: data.userId, sdp: null });
+                        pendingOutgoingPeers.push(data.userId);
                         return;
                     }
                     await createPeerConnection(data.userId, true);
                 }
                 else if (data.type === "voice.offer" && data.to === currentUserId) {
                     if (!localStream) {
-                        console.warn("⚠️ localStream not initialized yet. Skipping peer setup.");
+                        console.log("localStream not initialized yet. Queuing peer setup for:", data.from);
+                        pendingIncomingOffers.push({ from: data.from, sdp: data.sdp });
                         return;
                     }
-                    await createPeerConnection(data.from, false, data.sdp);
+                    await setupPeerConnection(data.from, false, data.sdp);
                 }
                 else if (data.type === "voice.answer") {
                     const pc = peerConnections[data.from];
@@ -333,15 +438,153 @@
                     }));
                 }
                 else if (data.type === "voice.ice" && data.to === currentUserId) {
-                    const pc = peerConnections[data.from];
-                    if (!pc) {
-                        console.warn("⚠️ No peer connection found for ICE from", data.from);
+                    console.log("❄️ Received ICE candidate from", data.from);
+                    const peer = peers[data.from];
+                    if (!peer) {
+                        console.warn("⚠️ No peer found for ICE candidate from", data.from);
                         return;
                     }
-                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    try {
+                        await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        console.log("✅ ICE candidate added for", data.from);
+                    } catch (err) {
+                        console.error("❌ Failed to add ICE candidate from", data.from, err);
+                    }
                 }
             };
 
+            async function fetchMeetingInvite(roomName) {
+                try {
+                    console.log("roomName:",roomName)
+                    const response = await fetch(`/api/invite/${roomName}/`);
+                    const result = await response.json();
+
+                    if (result.status === "ok") {
+                        const invite = result.invite;
+                        currentUserId = `{invite.sender_id}`;
+                        roomCreatorId =  `{invite.target_id}`;
+
+                        isRoomCreator = currentUserId === roomCreatorId;
+                        console.log("currentUserId:", currentUserId);
+                        console.log("roomCreatorId:", roomCreatorId);
+                        console.log("isRoomCreator:", isRoomCreator);
+
+                        console.log("📨 Meeting Invite Details:");
+                        console.log("Room:", invite.room);
+                        console.log("Sender:", invite.sender_username, `(ID: ${invite.sender_id})`);
+                        console.log("Target:", invite.target_username, `(ID: ${invite.target_id})`);
+                        console.log("Timestamp:", invite.timestamp);
+
+                        return invite; // ✅ return for further use
+                    } else {
+                        console.warn("⚠️ Failed to fetch invite:", result.message);
+                        return null;
+                    }
+                } catch (error) {
+                    console.error("❌ Error fetching invite:", error);
+                    return null;
+                }
+            }
+
+            meetingSocket.onclose = (event) => {
+                console.warn("⚠️ WebSocket closed:", event.code, event.reason);
+                if (event.code !== 1000 && reconnectAttempts < 5) {
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000); // exponential backoff
+                    reconnectAttempts++;
+                    console.log(`🔄 Attempting reconnect in ${delay}ms...`);
+
+                    setTimeout(() => {
+                        meetingSocket = createSocket(); // reassign global
+                    }, delay);
+                } else {
+                    showUserFeedback("Connection lost. Please refresh or try again.");
+                }
+            };
+
+            meetingSocket.onerror = (error) => {
+                console.error("❌ WebSocket error:", error);
+            };
+
+            // function createPeerConnection(targetUser) {
+            //     const peer = new RTCPeerConnection();
+            //     peers[targetUser] = peer;
+
+            //     if (localStream && peer.getSenders().length === 0) {
+            //         //console.log("🎙️ Attaching localStream to peer:", targetUser);
+            //         localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+            //     }
+
+            //     peer.onicecandidate = (event) => {
+            //         if (event.candidate) {
+            //             meetingSocket.send(JSON.stringify({
+            //                 type: "voice.ice",
+            //                 candidate: event.candidate,
+            //                 sender: username,
+            //                 target: targetUser
+            //             }));
+            //         }
+            //     };
+
+            //     peer.onconnectionstatechange = () => {
+            //         console.log("🔁 Connection state with", targetUser, ":", peer.connectionState);
+            //     };
+
+            //     return peer;
+            // }
+
+            async function createPeerConnection(targetUser, isOfferer = false) {
+                const peer = new RTCPeerConnection();
+                peers[targetUser] = peer;
+
+                if (localStream && peer.getSenders().length === 0) {
+                    localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+                }
+
+                peer.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        if (meetingSocket.readyState === WebSocket.OPEN) {
+                            meetingSocket.send(JSON.stringify({
+                                type: "voice.ice",
+                                candidate: event.candidate,
+                                sender: username,
+                                target: targetUser
+                            }));
+                        } else {
+                            console.warn("⚠️ WebSocket not open. Skipping send.");
+                        }
+                    }
+                };
+
+                peer.onconnectionstatechange = () => {
+                    console.log("🔁 Connection state with", targetUser, ":", peer.connectionState);
+                };
+
+                peer.ontrack = (event) => {
+                    const remoteStream = event.streams[0];
+                    console.log("🔊 ontrack fired for", targetUser);
+                    attachRemoteAudio(targetUser, remoteStream);
+                };
+
+                // ✅ Caller initiates offer
+                if (isOfferer) {
+                    const offer = await peer.createOffer();
+                    await peer.setLocalDescription(offer);
+                    console.log("📤 Creating and sending SDP offer to", targetUser);
+                    if (meetingSocket.readyState === WebSocket.OPEN) {
+                        meetingSocket.send(JSON.stringify({
+                            type: "voice.offer",
+                            sdp: offer.sdp,
+                            sender: username,
+                            target: targetUser
+                        }));
+                    } else {
+                        console.warn("⚠️ WebSocket not open. Skipping send.");
+                    }
+
+                }
+
+                return peer;
+            }
 
             notificationSocket.onopen = () => {
                 console.log("🔔 Notification WebSocket connected");
@@ -391,21 +634,50 @@
 
             startCallBtn.addEventListener("click", async () => {
                 try {
+                    const flushedPeers = new Set();
                     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    //console.log("localStream = ", localStream);
+                    window.localStream = localStream;
                     console.log("🎙️ Mic access granted");
 
-                    // // Attach local stream to your audio UI (optional)
-                    // const localAudio = document.createElement("audio");
-                    // localAudio.srcObject = localStream;
-                    // localAudio.autoplay = true;
-                    // localAudio.muted = true; // prevent echo
-                    // document.body.appendChild(localAudio);
-                    // console.log("🎙️ currentUserId : ", currentUserId);
-                    // Notify backend you're ready to join mesh
-                    meetingSocket.send(JSON.stringify({
-                        type: "voice.ready",
-                        userId: currentUserId
-                    }));
+                    // ✅ Set role flag
+                    //isRoomCreator = true;
+                    if (meetingSocket.readyState === WebSocket.OPEN) {
+
+                        meetingSocket.send(JSON.stringify({
+                            type: "voice.ready",
+                            userId: currentUserId
+                        }));
+                    } else {
+                        console.warn("⚠️ WebSocket not open. Skipping send.");
+                    }
+
+
+                    // ✅ Flush based on role
+                    if (isRoomCreator) {
+                        if (pendingOutgoingPeers.length > 0) {
+                            console.log("🧪 Queued peer setups:", pendingOutgoingPeers);
+                            for (const userId of pendingOutgoingPeers) {
+                                if (!flushedPeers.has(userId)) {
+                                    console.log("🔄 Flushing outgoing peer setup for:", userId);
+                                    await createPeerConnection(userId, true);
+                                    flushedPeers.add(userId);
+                                }
+                            }
+                            pendingOutgoingPeers.length = 0;
+                        }
+                        if (pendingIncomingOffers.length > 0) {
+                            console.log("🧪 Queued incoming offers:", pendingIncomingOffers);
+                            for (const { from, sdp } of pendingIncomingOffers) {
+                                console.log("🔄 Flushing incoming offer from:", from);
+                                await setupPeerConnection(from, false, sdp);
+                            }
+                            pendingIncomingOffers.length = 0;
+                        }
+                    }
+                    console.log("isRoomCreator:", isRoomCreator);
+                    console.log("pendingOutgoingPeers:", pendingOutgoingPeers);
+
                 } catch (err) {
                     console.error("❌ Mic access failed:", err);
                     alert("Please allow microphone access to join the call.");
@@ -453,7 +725,7 @@
             socket.onmessage = (event) => {
                 //console.log("Socket readyState:", socket.readyState);
                 const data = JSON.parse(event.data);
-                console.log("🔍 socket.onmessage message received:", data.type);
+                //console.log("🔍 socket.onmessage message received:", data.type);
                 const currentUserId = document.getElementById("meeting-container").dataset.userId;
                 if (data.type === "chat") {
                     const chatBox = document.getElementById("chatMessages");
@@ -513,7 +785,7 @@
                 document.getElementById("accept-invite-btn").onclick = () => {
                     window.location.href = `/meeting/${roomName}/${currentUserId}/`;
                     cuserId = currentUserId;
-                    console.log("currentUserId : ", currentUserId)
+                    console.log("currentUserId accept-invite-btn : ", cuserId)
                 };
 
                 document.getElementById("decline-invite-btn").onclick = () => {
@@ -637,11 +909,11 @@
 
         function inviteUser(userId, roomName, button, listItem) {
             //console.log("Inviting user:", userId, "to room:", roomName);
-
+            const vtag = "meet"
             fetch("/api/send-meeting-invite/", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ room: roomName, target: userId })
+                body: JSON.stringify({ room: roomName, target: userId, tag:vtag })
             })
                 .then(res => res.json())
                 .then(data => {
@@ -655,7 +927,7 @@
                         badge.textContent = "✅ Invited";
                         badge.className = "invite-badge";
                         listItem.appendChild(badge);
-                        console.log("Appending badge to:", listItem);
+                        //console.log("Appending badge to:", listItem);
 
                         // ❌ Remove redirect — inviter stays in current room
                     } else {
@@ -684,74 +956,36 @@
             }, 500);
         }
 
-        async function setupPeerConnection(targetUser, isOfferer = false, remoteSDP = null) {
-            if (peers[targetUser]) return peers[targetUser];
 
-            const peer = new RTCPeerConnection();
-            peers[targetUser] = peer;
-
-            if (localStream) {
-                localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
-            }
-
-            peer.onicecandidate = (event) => {
-                if (event.candidate) {
-                    socket.send(JSON.stringify({
-                        type: "candidate",
-                        candidate: event.candidate,
-                        sender: username,
-                        target: targetUser
-                    }));
-                }
-            };
-
-            peer.ontrack = (event) => {
-                const remoteStream = event.streams[0];
-                attachRemoteAudio(targetUser, remoteStream);
-            };
-
-            if (isOfferer) {
-                const offer = await peer.createOffer();
-                await peer.setLocalDescription(offer);
-
-                socket.send(JSON.stringify({
-                    type: "offer",
-                    sdp: offer.sdp,
-                    sender: username,
-                    target: targetUser
-                }));
-            }
-
-            if (remoteSDP) {
-                await peer.setRemoteDescription(new RTCSessionDescription({
-                    type: "offer",
-                    sdp: remoteSDP
-                }));
-
-                const answer = await peer.createAnswer();
-                await peer.setLocalDescription(answer);
-
-                socket.send(JSON.stringify({
-                    type: "answer",
-                    sdp: answer.sdp,
-                    sender: username,
-                    target: targetUser
-                }));
-            }
-
-            return peer;
-        }
 
         function attachRemoteAudio(userId, stream) {
-            let audio = document.getElementById(`audio-${userId}`);
+            let container = document.getElementById("audioContainer");
+
             if (!audio) {
                 audio = document.createElement("audio");
                 audio.id = `audio-${userId}`;
                 audio.autoplay = true;
-                document.getElementById("audioContainer").appendChild(audio);
+                audio.playsInline = true;
+                audio.muted = false; // Ensure it's not muted
+                container.appendChild(audio);// Or attach to a dedicated container
             }
+
             audio.srcObject = stream;
-            monitorMicActivity(stream, userId);
+
+            // Confirm stream has audio tracks
+            const tracks = stream.getAudioTracks();
+            console.log(`🎧 Attaching stream to ${userId}:`, tracks);
+
+            if (tracks.length === 0) {
+                console.warn(`⚠️ No audio tracks found for ${userId}`);
+            }
+
+            // Attempt playback
+            audio.play().then(() => {
+                console.log(`✅ Audio playback started for ${userId}`);
+            }).catch(err => {
+                console.warn(`⚠️ Audio playback failed for ${userId}:`, err);
+            });
         }
 
         function addParticipant(name) {

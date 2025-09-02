@@ -120,7 +120,8 @@ class MeetingConsumer(AsyncJsonWebsocketConsumer):
                 
     async def receive_json(self, content):
         msg_type = content["type"]
-        #print("✅ receive_json triggered with:", content)
+        print("📥 receive_json called with:", content)
+        print("📥 content['type'] =", content.get("type"))
         if msg_type == "voice.ready" or msg_type == "join":
             user_id = self.scope["user"].id
             #print("📡 voice.ready received from:", user_id)
@@ -132,7 +133,7 @@ class MeetingConsumer(AsyncJsonWebsocketConsumer):
                 }
             )
         elif msg_type == "voice.offer":
-            print("📡 voice.offer received from:", content["from"], "to:", content["to"])
+            print("📡 Backend received voice.offer from", content["from"], "to", content["to"])
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
@@ -156,8 +157,10 @@ class MeetingConsumer(AsyncJsonWebsocketConsumer):
                 self.room_group_name,
                 {
                     "type": "voice_ice",  # This must match the method name above
-                    "from": content["from"],
-                    "to": content["to"],
+                    # "from": content["from"],
+                    # "to": content["to"],
+                    "from": content.get("from") or content.get("sender"),
+                    "to": content.get("to") or content.get("target"),
                     "candidate": content["candidate"]
                 }
             )
