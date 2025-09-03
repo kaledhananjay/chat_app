@@ -23,14 +23,12 @@ from django.contrib.auth import get_user_model
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
-
 @login_required
 def chat_list_view(request):
     users = User.objects.exclude(
         id=request.user.id
     )  
     return render(request, "chat_list.html", {"users": users})
-
 
 @login_required
 def chat_view(request, user_id):
@@ -47,7 +45,6 @@ def chat_view(request, user_id):
     if request.method == "POST":
         message = request.POST.get("message")
         
-        print('I am here to save message :::: ', message)
         if message:  
             Chat.objects.create(sender=request.user, receiver=receiver, message=message)
             return redirect("chat", user_id=user_id) 
@@ -58,7 +55,6 @@ def chat_view(request, user_id):
         "chat.html",
         {"receiver": receiver, "chat_history": chat_history, "users": users},
     )
-
 
 @csrf_exempt
 def loadchat(request):
@@ -93,7 +89,6 @@ def loadchat(request):
 
     return JsonResponse({"messages": messages})
 
-
 def chat_index(request):
     users = User.objects.exclude(
         username=request.user.username
@@ -117,7 +112,6 @@ def get_messages(request, room_name):
     ]
     return JsonResponse({"messages": data})
 
-
 @csrf_exempt
 def send_message(request):
     if request.method == "POST":
@@ -131,12 +125,9 @@ def send_message(request):
         Message.objects.create(
             sender=sender, room_name=data["room_name"], content=data["message"]
         )
-        print("Returning messages for room:", data["room_name"])
-        print(Message.objects.filter(room_name=data["room_name"]))
 
         return JsonResponse({"status": "Message Sent!"})
     return JsonResponse({"error": "Invalid request"}, status=400)
-
 
 @csrf_exempt
 @api_view(["POST"])
@@ -147,13 +138,11 @@ def start_call(request):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @csrf_exempt
 @api_view(["GET"])
 def get_offer(request):
     try:
         user_id = request.GET.get("for_user")
-        print("🔍 Incoming offer request for user:", user_id)
 
         call = CallSession.objects.filter(
             receiver_id=user_id,
@@ -176,7 +165,6 @@ def get_offer(request):
         print("Error in get_offer:", e)
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @csrf_exempt
 @api_view(["POST"])
 def send_answer(request):
@@ -190,7 +178,6 @@ def send_answer(request):
     except CallSession.DoesNotExist:
         return Response({"error": "Call not found"}, status=status.HTTP_404_NOT_FOUND)
 
-
 @csrf_exempt
 @api_view(["GET"])
 def get_answer(request):
@@ -203,16 +190,16 @@ def get_answer(request):
     except CallSession.DoesNotExist:
         return Response({"error": "Call not found"}, status=status.HTTP_404_NOT_FOUND)
 
-
 @csrf_exempt
 @api_view(["POST"])
 def test_post(request):
     return Response({"message": "POST received"})
 
-
+# Returns current logged in user Name and ID
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def current_user_view(request):
+    print("!!Returns current logged in user Name and ID")
     user = request.user
     return Response(
         {
@@ -221,6 +208,9 @@ def current_user_view(request):
         }
     )
 
+# Converts source audio to respective text
+# Translate source coverted text to target language text
+# Converts back target language text to target audio
 @csrf_exempt
 def translate_audio(request):
     if request.method != "POST" or "audio" not in request.FILES:
@@ -271,24 +261,21 @@ def translate_audio(request):
        
     try:
         mp3_path = wav_path.replace(".wav", "_ja.mp3")
-        print("🔉Japanese TTS : ", mp3_path)
         tts = gTTS(translated, lang="ja")
         tts.save(mp3_path)
-        print("TTS audio saved:", mp3_path)
     except Exception as e:
         return JsonResponse({"error": f"TTS failed: {e}"}, status=500)
 
     audio_url = f"/media/{os.path.basename(mp3_path)}"
     return JsonResponse({"translated": translated, "audio_url": audio_url})
 
+# Saves chat message in database with MesageText, Sender and Receiver
 @csrf_exempt
 @login_required
 def save_message_view(request):
     if request.method == "POST":
         try:
-            print("Raw body:", request.body)
             data = json.loads(request.body)
-            print("Parsed data:", data)
 
             receiver_id = data.get("receiver_id")
             message = data.get("message")
@@ -310,6 +297,7 @@ def save_message_view(request):
             return JsonResponse({"error": str(e)}, status=500)
     return JsonResponse({"error": "Invalid request method"}, status=405)
 
+# Fetch meeting room details using room name from database
 @login_required
 def meeting_room(request, room_name, user_id):
     invited_user = get_object_or_404(User, id=user_id)
@@ -322,26 +310,19 @@ def meeting_room(request, room_name, user_id):
             "room_creator_id": invite.sender.id  # ✅ this is the room creator
         })
 
-    # return render(request, "meeting.html", {
-    #     "room_name": room_name,
-    #     #"username": invited_user.username 
-    #     "username": request.user.username
-    # })
-
-@csrf_exempt  # Optional: remove if using CSRF tokens via fetch
+# Saves meeting room details to database depending on tag which represents the 
+# page from which this view is called
+@csrf_exempt
 @login_required
 def send_meeting_invite(request):
     if request.method != "POST":
         return JsonResponse({"error": "Invalid method"}, status=405)
-
     try:
-        print("!!!!!!!!!!!!!!!!!!send_meeting_invite")
         data = json.loads(request.body)
         room = data.get("room")
         target_id = data.get("target")
         sender = request.user
         tag = data.get("tag")
-        print("Reveived tag as: ", tag )
         if tag == "chat":
             if not room or not target_id:
                 return JsonResponse({"error": "Missing room or target"}, status=400)
@@ -357,6 +338,19 @@ def send_meeting_invite(request):
 
             print(f"📨 Meeting invite from {sender.username} to {target_user.username} for room {room}")
         elif tag == "meet":
+            if not room or not target_id:
+                return JsonResponse({"error": "Missing room or target"}, status=400)
+
+            User = get_user_model()
+            try:
+                target_user = User.objects.get(id=target_id)
+            except User.DoesNotExist:
+                return JsonResponse({"error": "Target user not found"}, status=404)
+
+            # ✅ Save invite to DB
+            #MeetingInvite.objects.create(sender=sender, target=target_user, room=room)
+
+            print(f"📨 Meeting invite from {sender.username} to {target_user.username} for room {room}")
             #✅ Send WebSocket notification to invited user
             channel_layer = get_channel_layer()
             print(f"Sending invite to user_{target_user.id}")
@@ -377,14 +371,9 @@ def send_meeting_invite(request):
         print("❌ Error sending invite:", str(e))
         return JsonResponse({"error": str(e)}, status=400)
 
-
-
-        
 @login_required
 def meeting_room_group(request, room_name):
-    print("🔥 meeting_room_group triggered yy")
     all_users = User.objects.exclude(id=request.user.id)
-    print("✅ user_id", request.user.id)
     return render(request, "meeting.html", {
         "room_name": room_name,
         "username": request.user.username,
@@ -395,9 +384,6 @@ def meeting_room_group(request, room_name):
 
 @login_required
 def meeting_room_direct(request, room_name, target_id):
-    print("🔥 meeting_room_direct triggered XX")
-    print("User Name : ",target_id )
-    print("request.user.id : ",request.user.id )
     all_users = User.objects.exclude(id=request.user.id)
     target_user = get_object_or_404(User, id=target_id)
     
@@ -440,7 +426,7 @@ async def receive(self, text_data):
                 "username": data["user_id"] 
             }
         )
-        
+       
 async def user_joined(self, event):
     await self.send(text_data=json.dumps({
         "type": "user_joined",
@@ -453,7 +439,6 @@ def embedded_meeting_view(request, room_name, user_id):
         "room_name": room_name,
         "user_id": user_id,
     })
-    
 
 @login_required
 def get_pending_invites(request):
@@ -469,8 +454,6 @@ def get_pending_invites(request):
         for invite in invites
     ]
     return JsonResponse({"invites": data})
-
-
 
 @csrf_exempt
 @login_required
@@ -523,3 +506,38 @@ def create_meeting_room(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+
+
+
+@csrf_exempt
+def temploadchat(request):
+    receiver_id = request.GET.get("receiver")
+    
+    if not receiver_id:
+        return JsonResponse({"error": "Missing receiver ID"}, status=400)
+
+    try:
+        receiver = User.objects.get(id=receiver_id)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "Receiver not found"}, status=404)
+
+    sender = request.user
+    if not sender.is_authenticated:
+        sender = User.objects.get(username="admin")
+
+    chat_history = Chat.objects.filter(
+        sender=sender, receiver=receiver
+    ) | Chat.objects.filter(sender=receiver, receiver=sender)
+
+    chat_history = chat_history.order_by("timestamp")
+
+    messages = [
+        {
+            "sender": msg.sender.username,
+            "content": msg.message,
+            "timestamp": msg.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        for msg in chat_history
+    ]
+
+    return JsonResponse({"messages": messages})

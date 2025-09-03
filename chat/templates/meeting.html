@@ -250,7 +250,6 @@
         });
         let roomNameN = null
         document.addEventListener("DOMContentLoaded", () => {
-            //let leaveBtn = null;
             const startCallBtn = document.getElementById("startCallBtn");
             let leaveCallBtn = document.getElementById("leaveBtn");
             let muteToggleBtn = document.getElementById("muteBtn");
@@ -260,28 +259,22 @@
             const socket = new WebSocket(`ws://${window.location.host}/ws/meeting/${roomName}/`);
             const notificationSocket = new WebSocket(`ws://${window.location.host}/ws/notifications/`);
             const meetingSocket = new WebSocket(`ws://${window.location.host}/ws/meeting/{{ room_name }}/`);
-            //const currentUserId = "{{ user_id }}";
             const peerConnections = {};
-            const pendingOutgoingPeers = []; // for caller-side offers
-            const pendingIncomingOffers = []; // for callee-side responses
+            const pendingOutgoingPeers = [];
+            const pendingIncomingOffers = [];
             let localStream = null;
             const peers = {};
             roomNameN = roomName
             let isMuted = false;
             const participants = new Set();
-            const userId = window.location.pathname.split("/")[3];   // "2"
-
+            const userId = window.location.pathname.split("/")[3];
+            let reconnectAttempts;
             let currentUserId;
+            let currentUserName;
             let roomCreatorId;
 
             let isRoomCreator;
-            console.log("isRoomCreator:", isRoomCreator);
 
-
-            //const currentUserId = "{{ request.user.id }}";
-
-            console.log("currentUserId:", currentUserId);
-            console.log("roomCreatorId:", roomCreatorId);
             async function setupPeerConnection(targetUser, isOfferer = false, remoteSDP = null) {
                 if (peers[targetUser]) return peers[targetUser];
 
@@ -290,9 +283,7 @@
 
                 // Attach local media tracks
                 if (localStream) {
-                    //console.log("🎙️ Attaching localStream to peer:", targetUser);
                     localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
-                    //console.log("🎙️ localStream tracks:", localStream.getAudioTracks());
                 }
 
                 // Handle ICE candidates
@@ -385,19 +376,17 @@
             }
 
             console.log("✅ DOM fully loaded");
-            //console.log("currentUserId accept-invite-btn : ", cuserId)
             leaveCallBtn = document.getElementById("leaveBtn");
             if (leaveCallBtn) {
                 leaveCallBtn.addEventListener("click", () => {
                     socket.close(); // Disconnect WebSocket
                     notificationSocket.close();
-                    window.location.href = `/chat/{{cuserId}}/`; // Redirect
+                    //console.log("/chat/" + currentUserId+ "/");
+                    window.location.href = "/chat/" + currentUserId+ "/"; // Redirect
                 });
             } else {
                 console.warn("⚠️ leaveCallBtn not found in DOM");
             }
-
-
 
             meetingSocket.onopen = () => {
                 console.log("✅ Connected to meetingSocket for meeting room");
@@ -407,12 +396,47 @@
             meetingSocket.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
                 console.log("📥 meetingSocket.onmessage Message received:", roomName);
-                fetchMeetingInvite(roomName)
+                if (roomName) {
+                    try {
+                        //fetchloggedinuser();
+
+                        const userdata = await fetch('/api/me', {
+                            method: 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Requested-With': 'XMLHttpRequest'
+                            },
+                            credentials: 'include'  // 🔑 ensures cookies are sent
+                        });
+
+                        if (!userdata.ok) {
+                            throw new Error(`HTTP ${userdata.status}`);
+                        }
+
+                        const data = await userdata.json();
+                        currentUserId = data.id;
+                        currentUserName = data.username;
+
+                        const response = await fetch(`/api/invite/${roomName}/`);
+                        const result = await response.json();
+
+                        if (result.status === "ok") {
+                            const invite = result.invite;
+                            roomCreatorId = invite.sender_id;
+
+                            isRoomCreator = currentUserId === roomCreatorId;
+                        } else {
+                            console.warn("⚠️ Failed to fetch invite:", result.message);
+                            return null;
+                        }
+                    } catch (error) {
+                        console.error("❌ Error fetching invite:", error);
+                    }
+                }
                 if (data.type === "voice_joined" && data.userId !== currentUserId && isRoomCreator) {
                     //if (!localStream) {
                     if (!pendingOutgoingPeers.includes(data.userId)) {
                         console.warn("⚠️ localStream not initialized yet. Queuing peer setup for:", data.userId);
-                        //pendingOutgoingPeers.push({ from: data.userId, sdp: null });
                         pendingOutgoingPeers.push(data.userId);
                         return;
                     }
@@ -453,39 +477,6 @@
                 }
             };
 
-            async function fetchMeetingInvite(roomName) {
-                try {
-                    console.log("roomName:",roomName)
-                    const response = await fetch(`/api/invite/${roomName}/`);
-                    const result = await response.json();
-
-                    if (result.status === "ok") {
-                        const invite = result.invite;
-                        currentUserId = `{invite.sender_id}`;
-                        roomCreatorId =  `{invite.target_id}`;
-
-                        isRoomCreator = currentUserId === roomCreatorId;
-                        console.log("currentUserId:", currentUserId);
-                        console.log("roomCreatorId:", roomCreatorId);
-                        console.log("isRoomCreator:", isRoomCreator);
-
-                        console.log("📨 Meeting Invite Details:");
-                        console.log("Room:", invite.room);
-                        console.log("Sender:", invite.sender_username, `(ID: ${invite.sender_id})`);
-                        console.log("Target:", invite.target_username, `(ID: ${invite.target_id})`);
-                        console.log("Timestamp:", invite.timestamp);
-
-                        return invite; // ✅ return for further use
-                    } else {
-                        console.warn("⚠️ Failed to fetch invite:", result.message);
-                        return null;
-                    }
-                } catch (error) {
-                    console.error("❌ Error fetching invite:", error);
-                    return null;
-                }
-            }
-
             meetingSocket.onclose = (event) => {
                 console.warn("⚠️ WebSocket closed:", event.code, event.reason);
                 if (event.code !== 1000 && reconnectAttempts < 5) {
@@ -497,40 +488,13 @@
                         meetingSocket = createSocket(); // reassign global
                     }, delay);
                 } else {
-                    showUserFeedback("Connection lost. Please refresh or try again.");
+                    //showUserFeedback("Connection lost. Please refresh or try again.");
                 }
             };
 
             meetingSocket.onerror = (error) => {
                 console.error("❌ WebSocket error:", error);
             };
-
-            // function createPeerConnection(targetUser) {
-            //     const peer = new RTCPeerConnection();
-            //     peers[targetUser] = peer;
-
-            //     if (localStream && peer.getSenders().length === 0) {
-            //         //console.log("🎙️ Attaching localStream to peer:", targetUser);
-            //         localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
-            //     }
-
-            //     peer.onicecandidate = (event) => {
-            //         if (event.candidate) {
-            //             meetingSocket.send(JSON.stringify({
-            //                 type: "voice.ice",
-            //                 candidate: event.candidate,
-            //                 sender: username,
-            //                 target: targetUser
-            //             }));
-            //         }
-            //     };
-
-            //     peer.onconnectionstatechange = () => {
-            //         console.log("🔁 Connection state with", targetUser, ":", peer.connectionState);
-            //     };
-
-            //     return peer;
-            // }
 
             async function createPeerConnection(targetUser, isOfferer = false) {
                 const peer = new RTCPeerConnection();
@@ -582,7 +546,6 @@
                     }
 
                 }
-
                 return peer;
             }
 
@@ -636,12 +599,9 @@
                 try {
                     const flushedPeers = new Set();
                     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    //console.log("localStream = ", localStream);
                     window.localStream = localStream;
                     console.log("🎙️ Mic access granted");
 
-                    // ✅ Set role flag
-                    //isRoomCreator = true;
                     if (meetingSocket.readyState === WebSocket.OPEN) {
 
                         meetingSocket.send(JSON.stringify({
@@ -696,9 +656,6 @@
                     localStream = null;
                 }
                 document.getElementById("startCallBtn").style.display = "inline-block";
-                //leaveCallBtn.style.display = "none";
-                //muteToggleBtn.style.display = "none";
-                //removeParticipant(username);
             } else {
                 console.warn("⚠️ leaveCallBtn not found in DOM");
             }
@@ -723,9 +680,7 @@
             }
 
             socket.onmessage = (event) => {
-                //console.log("Socket readyState:", socket.readyState);
                 const data = JSON.parse(event.data);
-                //console.log("🔍 socket.onmessage message received:", data.type);
                 const currentUserId = document.getElementById("meeting-container").dataset.userId;
                 if (data.type === "chat") {
                     const chatBox = document.getElementById("chatMessages");
@@ -744,7 +699,6 @@
                 }
                 else if (data.type === "receive_invite") {
                     console.log(`📨 Invite from ${data.from} to join room ${data.room}`);
-                    //showInviteModal(data.room, data.from);
                     console.log(`📥 Meeting invite received from 3`);
                     showInviteModal({
                         sender: data.from,
@@ -753,8 +707,6 @@
                 }
 
                 else if (data.type === "meeting_invite") {
-                    //console.log(`📥 Meeting invite received from ${data.sender} for room ${data.room}`);
-
                     if (data.target === currentUserId) {
                         // ✅ Only redirect the invited user
                         window.location.href = `/meeting/${data.room}/${data.sender}/`;
@@ -913,7 +865,7 @@
             fetch("/api/send-meeting-invite/", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ room: roomName, target: userId, tag:vtag })
+                body: JSON.stringify({ room: roomName, target: userId, tag: vtag })
             })
                 .then(res => res.json())
                 .then(data => {
@@ -955,8 +907,6 @@
                 }
             }, 500);
         }
-
-
 
         function attachRemoteAudio(userId, stream) {
             let container = document.getElementById("audioContainer");
