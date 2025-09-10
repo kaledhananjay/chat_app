@@ -10,49 +10,57 @@ ROOM_PARTICIPANTS = {}
 class MeetingConsumer(AsyncJsonWebsocketConsumer):
 #class MeetingConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        print("🧠 MeetingConsumer connected for:", self.scope["path"])
-        self.room_name = self.scope["url_route"]["kwargs"]["room_name"]
-        self.user = self.scope["user"]
-        self.user_group = f"user_{self.user.id}"
-        self.room_group_name = f"chat_{self.room_name}"
-        if self.user.is_anonymous:
-            await self.close()
-            return
-        await self.channel_layer.group_add(self.user_group, self.channel_name)
-        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-        await self.accept()
-        print(f"✅ Connected: {self.user.username} added to {self.user_group} in room {self.room_name}")
-        
-        # Add user to Redis-backed participant list
-        add_participant(self.room_name, self.user)
+        try:     
+            print("🧠 MeetingConsumer connected for:", self.scope["path"])
+            self.room_name = self.scope["url_route"]["kwargs"]["room_name"]
+            self.user = self.scope["user"]
+            self.user_group = f"user_{self.user.id}"
+            self.room_group_name = f"chat_{self.room_name}"
+            if self.user.is_anonymous:
+                await self.close()
+                return
+            await self.channel_layer.group_add(self.user_group, self.channel_name)
+            await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+            await self.accept()
+            print(f"✅ Connected: {self.user.username} added to {self.user_group} in room {self.room_name}")
+            
+            # Add user to Redis-backed participant list
+            add_participant(self.room_name, self.user)
 
-        # Broadcast updated list to all users in room
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "participant_update"
-            }
-        )
-        
-        await self.send_participant_list()
+            # Broadcast updated list to all users in room
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "participant_update"
+                }
+            )
+            await self.send_participant_list()
+        except Exception as e:
+            print("❌ Exception in connect:", str(e))
+
 
     # async def receive(self, text_data):
     #     print("📩 Raw message received:", text_data)
     
     async def disconnect(self, close_code):
-        if hasattr(self, "room_group_name"):
-            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        try:
+            if hasattr(self, "room_group_name"):
+                await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
-        # Remove user from Redis-backed list
-        remove_participant(self.room_name, self.user.id)
+            # Remove user from Redis-backed list
+            remove_participant(self.room_name, self.user.id)
 
-        # Broadcast updated list
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "participant_update"
-            }
-        )
+            # Broadcast updated list
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "participant_update"
+                }
+            )
+        except Exception as e:
+            print(f"🔌 WebSocket disconnected with code {close_code}")
+
+
 
     async def voice_joined(self, event):
         #user_id = event["userId"]
@@ -119,60 +127,84 @@ class MeetingConsumer(AsyncJsonWebsocketConsumer):
         }))
                 
     async def receive_json(self, content):
-        msg_type = content["type"]
-        print("📥 receive_json called with:", content)
-        print("📥 content['type'] =", content.get("type"))
-        if msg_type == "voice.ready" or msg_type == "join":
-            user_id = self.scope["user"].id
-            #print("📡 voice.ready received from:", user_id)
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "voice_joined",
-                    "userId": user_id
-                }
-            )
-        elif msg_type == "voice.offer":
-            print("📡 Backend received voice.offer from", content["from"], "to", content["to"])
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "voice_offer", 
-                    "from": content["from"],
-                    "to": content["to"],
-                    "sdp": content["sdp"]
-                   }
-            )
-        elif msg_type  == "voice.answer":
-            await self.channel_layer.group_send(
-                f"user_{content["to"]}",
-                {
-                    "type": "voice_answer",
-                    "from": content["from"],
-                    "sdp": content["sdp"]
-                }
-            )
-        elif msg_type  == "voice.ice":
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "voice_ice",  # This must match the method name above
-                    # "from": content["from"],
-                    # "to": content["to"],
-                    "from": content.get("from") or content.get("sender"),
-                    "to": content.get("to") or content.get("target"),
-                    "candidate": content["candidate"]
-                }
-            )
-        elif msg_type   == "voice.ready":
-            user_id = self.scope["user"].id
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "voice_joined",
-                    "userId": user_id
-                }
-            )
+        try:
+            print("📨 Incoming WebSocket message:", content)
+            msg_type = content["type"]
+            print("📥 receive_json called with:", content)
+            print("📥 content['type'] =", content.get("type"))
+            if msg_type == "voice.ready" or msg_type == "join":
+                user_id = self.scope["user"].id
+                #print("📡 voice.ready received from:", user_id)
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        "type": "voice_joined",
+                        "userId": user_id
+                    }
+                )
+            elif msg_type == "voice.offer":
+                try:
+                    print("📡 Backend received voice.offer from", content["sender"], content["target"], content["sdp"])
+                    target_id = content["target"]
+                    sdp = content["sdp"]
+                    sender = content["sender"]
+                    if not target_id or not sdp:
+                        raise ValueError("Missing target or SDP")
+                    
+                    print("📤 Preparing to send offer:", {
+                        "from": sender,
+                        "to": target_id,
+                        "sdp_length": len(sdp)
+                    })
+
+                    await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        "type": "voice_offer", 
+                        "from":sender,
+                        "to": target_id,
+                        "sdp":sdp
+                    }
+                )
+                except Exception as e:
+                    print("❌ Error handling voice.offer:", str(e))
+                    await self.close(code=1011)
+
+
+            elif msg_type  == "voice.answer":
+                await self.channel_layer.group_send(
+                    f"user_{content["to"]}",
+                    {
+                        "type": "voice_answer",
+                        "from": content["from"],
+                        "sdp": content["sdp"]
+                    }
+                )
+            elif msg_type  == "voice.ice":
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        "type": "voice_ice",  # This must match the method name above
+                        # "from": content["from"],
+                        # "to": content["to"],
+                        "from": content.get("from") or content.get("sender"),
+                        "to": content.get("to") or content.get("target"),
+                        "candidate": content["candidate"]
+                    }
+                )
+            elif msg_type   == "voice.ready":
+                user_id = self.scope["user"].id
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        "type": "voice_joined",
+                        "userId": user_id
+                    }
+                )
+        except Exception as e:
+            print("❌ Exception in receive_json:", str(e))
+            await self.close(code=1011)
+       
 
     async def voice_answer(self, event):
         await self.send(text_data=json.dumps({
@@ -200,7 +232,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
         if self.user.is_authenticated:
             await self.channel_layer.group_add(f"user_{self.user.id}", self.channel_name)
             await self.accept()
-            print(f"✅ NotificationConsumer connected for user_{self.user.id}")
+            print(f"✅ User {self.scope['user'].id} joined group user_{self.scope['user'].id}")
         else:
             await self.close()
 

@@ -22,6 +22,8 @@ from django.utils.decorators import method_decorator
 from django.contrib.auth import get_user_model
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from django.core.cache import cache
+
 
 @login_required
 def chat_list_view(request):
@@ -213,6 +215,9 @@ def current_user_view(request):
 # Converts back target language text to target audio
 @csrf_exempt
 def translate_audio(request):
+    # user_id = request.POST.get("senderId")
+    # target_lang = cache.get(f"user_lang_{user_id}", "en")  # fallback to English
+    
     if request.method != "POST" or "audio" not in request.FILES:
         return JsonResponse({"error": "Invalid request"}, status=400)
 
@@ -268,6 +273,18 @@ def translate_audio(request):
 
     audio_url = f"/media/{os.path.basename(mp3_path)}"
     return JsonResponse({"translated": translated, "audio_url": audio_url})
+
+@csrf_exempt
+def set_language(request):
+    data = json.loads(request.body)
+    user_id = data.get("userId")
+    language = data.get("language")
+
+    if not user_id or not language:
+        return JsonResponse({"error": "Missing userId or language"}, status=400)
+
+    cache.set(f"user_lang_{user_id}", language, timeout=None)
+    return JsonResponse({"status": "ok"})
 
 # Saves chat message in database with MesageText, Sender and Receiver
 @csrf_exempt
@@ -506,9 +523,6 @@ def create_meeting_room(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-
-
-
 @csrf_exempt
 def temploadchat(request):
     receiver_id = request.GET.get("receiver")
@@ -541,3 +555,93 @@ def temploadchat(request):
     ]
 
     return JsonResponse({"messages": messages})
+
+
+# from django.views.decorators.csrf import csrf_exempt
+# from django.http import JsonResponse
+# from django.core.cache import cache
+# from deep_translator import GoogleTranslator
+# from gtts import gTTS
+# import speech_recognition as sr
+# import subprocess
+# import uuid
+# import os
+# from django.conf import settings
+
+@csrf_exempt
+def translate_audio_realtime(request):
+    if request.method != "POST" or "audio" not in request.FILES:
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    audio_file = request.FILES["audio"]
+    user_id = request.POST.get("senderId")
+    target_lang = request.POST.get("targetLang")
+
+    # print("📦 Uploaded file type:", audio_file.content_type)
+    # print("📥 Received audio from:", user_id)
+    # print("🌍 Target language:", target_lang)
+    
+    base_filename = str(uuid.uuid4())
+    webm_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.webm")
+    wav_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.wav")
+    # print("🔍 WAV file saved:", wav_path)
+    # print("📁 Saving to:", webm_path)
+
+    if audio_file.size > 3000:  # ~3KB
+    #    print("⚠️ Skipping small blob:", audio_file.size, "bytes")
+    #    return JsonResponse({"translated": "", "audio_url": ""}, status=200)
+    #else:
+        with open(webm_path, "wb") as f:
+            for chunk in audio_file.chunks():
+                f.write(chunk)
+
+        ffmpeg_cmd = [
+            "ffmpeg", "-y",
+            "-i", webm_path,
+            "-acodec", "pcm_s16le",
+            "-ar", "16000",
+            "-ac", "1",
+            wav_path
+        ]
+        print("🎧 FFmpeg conversion complete:", wav_path)
+        result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+    if result.returncode != 0 or not os.path.exists(wav_path):
+        # print("❌ FFmpeg failed or output file missing")
+        # print("🧾 FFmpeg stderr:", result.stderr.decode())
+        return JsonResponse({
+            "error": "FFmpeg conversion failed",
+            "details": result.stderr.decode(),
+        }, status=500)
+    # print("🎧 FFmpeg conversion complete:", wav_path)
+
+    recognizer = sr.Recognizer()
+    try:
+        with sr.AudioFile(wav_path) as source:
+            audio = recognizer.record(source)
+        text = recognizer.recognize_google(audio)
+        # print("🗣️ Recognized text:", text)
+    except sr.UnknownValueError:
+        return JsonResponse({"error": "Speech not understood"}, status=422)
+    except Exception as e:
+        return JsonResponse({"error": f"STT failed: {e}"}, status=500)
+
+    try:
+        translated = GoogleTranslator(source="auto", target=target_lang).translate(text)
+        print("🌐 Translated text:", translated)
+        if not translated.strip():
+            return JsonResponse({"error": "Translation empty", "translated": "", "audio_url": ""}, status=200)
+    except Exception as e:
+            return JsonResponse({"error": f"Translation failed: {e}"}, status=500)
+
+    try:
+        mp3_path = wav_path.replace(".wav", f"_{target_lang}.mp3")
+        tts = gTTS(translated, lang=target_lang)
+        tts.save(mp3_path)
+        # print("🔊 TTS audio saved:", mp3_path)
+
+    except Exception as e:
+        return JsonResponse({"error": f"TTS failed: {e}"}, status=500)
+
+    audio_url = f"/media/{os.path.basename(mp3_path)}"
+    return JsonResponse({"translated": translated, "audio_url": audio_url})

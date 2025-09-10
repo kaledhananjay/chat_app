@@ -154,6 +154,7 @@
           <option value="mr">Marathi (मराठी)</option>
           <option value="fr">French (Français)</option>
           <option value="es">Spanish (Español)</option>
+          <option value="ja">Japanese (日本語)</option>
         </select>
         <button id="startCall" class="btn btn-outline-success me-2" style="display: none;">🎤 Start Voice Call</button>
         <button id="pollForCall" style="display: none;" class="btn btn-outline-success me-2">Check Incoming
@@ -523,6 +524,7 @@
 
         try {
           const currentUserId = await getCurrentUserId();
+          sessionStorage.setItem("currentUserId", currentUserId);
           if (!currentUserId) return;
 
           const res = await fetch(`/api/call/offer?for_user=${currentUserId}`);
@@ -761,11 +763,28 @@
       fetch("/api/send-meeting-invite/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ room: roomName, target: receiverId, tag:vtag })
+        body: JSON.stringify({ room: roomName, target: receiverId, tag: vtag })
       }).then(() => {
         window.location.href = `/meeting/${roomName}/`;
       });
     });
+
+    function changeLanguage(lang) {
+      sessionStorage.setItem("targetLang", lang);
+
+      const currentUserId = sessionStorage.getItem("currentUserId");
+      console.log("🌍 Language preference saved:", lang, currentUserId);
+      fetch("/set_language", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: currentUserId, language: lang })
+      }).then(() => {
+        console.log("🌍 Language preference saved:", lang);
+      });
+
+      console.log("🌍 Language selected:", lang);
+    }
+
   </script>
 </body>
 

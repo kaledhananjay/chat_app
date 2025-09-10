@@ -272,7 +272,7 @@
             let currentUserId;
             let currentUserName;
             let roomCreatorId;
-
+            const pendingICECandidates = {};
             let isRoomCreator;
 
             async function setupPeerConnection(targetUser, isOfferer = false, remoteSDP = null) {
@@ -281,9 +281,25 @@
                 const peer = new RTCPeerConnection();
                 peers[targetUser] = peer;
 
-                // Attach local media tracks
+                // 🔁 Flush buffered ICE candidates if any
+                if (pendingICECandidates[targetUser]) {
+                    console.log(`🔁 Flushing buffered ICE candidates for ${targetUser}`);
+                    for (const candidate of pendingICECandidates[targetUser]) {
+                        try {
+                            await peer.addIceCandidate(new RTCIceCandidate(candidate));
+                            console.log(`✅ Buffered ICE candidate added for ${targetUser}`);
+                        } catch (err) {
+                            console.error(`❌ Failed to add buffered ICE candidate for ${targetUser}`, err);
+                        }
+                    }
+                    delete pendingICECandidates[targetUser];
+                }
+
                 if (localStream) {
-                    localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+                    localStream.getTracks().forEach(track => {
+                        console.log(`📎 Attaching local track: ${track.kind}, enabled: ${track.enabled}`);
+                        peer.addTrack(track, localStream);
+                    });
                 }
 
                 // Handle ICE candidates
@@ -329,6 +345,7 @@
                                 from: currentUserId,
                                 sdp: offer.sdp
                             }));
+                            console.log("📤 Sent voice.offer to backend:", targetUser);
                         } else {
                             console.warn("⚠️ WebSocket not open. Skipping send.");
                         }
@@ -340,13 +357,14 @@
                 }
 
                 // Callee receives offer and sends answer
-                if (remoteSDP) {
+                if (!isOfferer && remoteSDP) {
                     try {
                         console.log("📥 Setting remote SDP from offer for", targetUser);
                         await peer.setRemoteDescription(new RTCSessionDescription({
                             type: "offer",
                             sdp: remoteSDP
                         }));
+                        console.log("📥 SDP offer set as remote for", targetUser);
 
                         const answer = await peer.createAnswer();
                         await peer.setLocalDescription(answer);
@@ -357,6 +375,7 @@
                                 sender: username,
                                 target: targetUser
                             }));
+                            console.log("📤 Sent voice.answer to backend:", targetUser)
                         } else {
                             console.warn("⚠️ WebSocket not open. Skipping send.");
                         }
@@ -382,7 +401,7 @@
                     socket.close(); // Disconnect WebSocket
                     notificationSocket.close();
                     //console.log("/chat/" + currentUserId+ "/");
-                    window.location.href = "/chat/" + currentUserId+ "/"; // Redirect
+                    window.location.href = "/chat/" + currentUserId + "/"; // Redirect
                 });
             } else {
                 console.warn("⚠️ leaveCallBtn not found in DOM");
@@ -395,7 +414,7 @@
             // WebSocket message handler
             meetingSocket.onmessage = async (event) => {
                 const data = JSON.parse(event.data);
-                console.log("📥 meetingSocket.onmessage Message received:", roomName);
+                //console.log("📥 meetingSocket.onmessage Message received:", roomName);
                 if (roomName) {
                     try {
                         //fetchloggedinuser();
@@ -434,16 +453,18 @@
                     }
                 }
                 if (data.type === "voice_joined" && data.userId !== currentUserId && isRoomCreator) {
-                    //if (!localStream) {
-                    if (!pendingOutgoingPeers.includes(data.userId)) {
-                        console.warn("⚠️ localStream not initialized yet. Queuing peer setup for:", data.userId);
-                        pendingOutgoingPeers.push(data.userId);
-                        return;
+                    if (!localStream) {
+                        if (!pendingOutgoingPeers.includes(data.userId)) {
+                            console.warn("⚠️ localStream not initialized yet. Queuing peer setup for:", data.userId);
+                            pendingOutgoingPeers.push(data.userId);
+                            return;
+                        }
                     }
                     await createPeerConnection(data.userId, true);
                 }
                 else if (data.type === "voice.offer" && data.to === currentUserId) {
                     if (!localStream) {
+                        console.log("📥 Received SDP offer from", data.from)
                         console.log("localStream not initialized yet. Queuing peer setup for:", data.from);
                         pendingIncomingOffers.push({ from: data.from, sdp: data.sdp });
                         return;
@@ -452,30 +473,44 @@
                 }
                 else if (data.type === "voice.answer") {
                     const pc = peerConnections[data.from];
+                    console.log("📥 Received SDP answer from", data.sender)
                     if (!pc) {
                         console.warn("⚠️ No peer connection found for", data.from);
                         return;
                     }
-                    await pc.setRemoteDescription(new RTCSessionDescription({
-                        type: "answer",
-                        sdp: data.sdp
-                    }));
+                    else {
+                        await pc.setRemoteDescription(new RTCSessionDescription({
+                            type: "answer",
+                            sdp: data.sdp
+                        }));
+                    }
+                    console.log("📥 SDP answer set as remote for", data.sender);
                 }
                 else if (data.type === "voice.ice" && data.to === currentUserId) {
                     console.log("❄️ Received ICE candidate from", data.from);
                     const peer = peers[data.from];
-                    if (!peer) {
-                        console.warn("⚠️ No peer found for ICE candidate from", data.from);
-                        return;
-                    }
-                    try {
-                        await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
-                        console.log("✅ ICE candidate added for", data.from);
-                    } catch (err) {
-                        console.error("❌ Failed to add ICE candidate from", data.from, err);
+
+                    if (peer) {
+                        try {
+                            await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
+                            console.log("✅ ICE candidate added for", data.from);
+                        } catch (err) {
+                            console.error("❌ Failed to add ICE candidate from", data.from, err);
+                        }
+                    } else {
+                        console.warn("⚠️ No peer found for ICE candidate from", data.from, ". Buffering...");
+                        bufferICECandidate(data.from, data.candidate);
                     }
                 }
             };
+
+            function bufferICECandidate(fromUserId, candidate) {
+                if (!pendingICECandidates[fromUserId]) {
+                    pendingICECandidates[fromUserId] = [];
+                }
+                pendingICECandidates[fromUserId].push(candidate);
+                console.log(`📦 Buffered ICE candidate from ${fromUserId}:`, candidate);
+            }
 
             meetingSocket.onclose = (event) => {
                 console.warn("⚠️ WebSocket closed:", event.code, event.reason);
@@ -487,13 +522,13 @@
                     setTimeout(() => {
                         meetingSocket = createSocket(); // reassign global
                     }, delay);
-                } else {
-                    //showUserFeedback("Connection lost. Please refresh or try again.");
+                } else if (event.code === 1006) {
+                    alert("Connection lost. Please refresh or rejoin the call.");
                 }
             };
 
-            meetingSocket.onerror = (error) => {
-                console.error("❌ WebSocket error:", error);
+            meetingSocket.onerror = (event) => {
+                console.error("❌ WebSocket error:", event);
             };
 
             async function createPeerConnection(targetUser, isOfferer = false) {
@@ -501,6 +536,7 @@
                 peers[targetUser] = peer;
 
                 if (localStream && peer.getSenders().length === 0) {
+                    console.log("🎙️ Adding tracks to peer for", targetUser, localStream.getTracks());
                     localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
                 }
 
@@ -526,6 +562,7 @@
                 peer.ontrack = (event) => {
                     const remoteStream = event.streams[0];
                     console.log("🔊 ontrack fired for", targetUser);
+                    console.log("🎧 Remote stream tracks:", remoteStream.getTracks());
                     attachRemoteAudio(targetUser, remoteStream);
                 };
 
@@ -534,13 +571,16 @@
                     const offer = await peer.createOffer();
                     await peer.setLocalDescription(offer);
                     console.log("📤 Creating and sending SDP offer to", targetUser);
+                    console.log("📤 Creating and sending SDP offer from ", currentUserId);
                     if (meetingSocket.readyState === WebSocket.OPEN) {
                         meetingSocket.send(JSON.stringify({
                             type: "voice.offer",
                             sdp: offer.sdp,
-                            sender: username,
+                            sender: currentUserId,
                             target: targetUser
                         }));
+                        console.log("📤 After Creating and sending SDP offer to", targetUser);
+                        console.log("📤 After Creating and sending SDP offer from ", currentUserId);
                     } else {
                         console.warn("⚠️ WebSocket not open. Skipping send.");
                     }
@@ -601,6 +641,10 @@
                     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     window.localStream = localStream;
                     console.log("🎙️ Mic access granted");
+                    const targetLang = sessionStorage.getItem("targetLang") || "en";
+                    //console.log("🌍 Translation target language:", targetLang);
+
+                    startTranslationStream(localStream, targetLang);
 
                     if (meetingSocket.readyState === WebSocket.OPEN) {
 
@@ -635,7 +679,7 @@
                             pendingIncomingOffers.length = 0;
                         }
                     }
-                    console.log("isRoomCreator:", isRoomCreator);
+                    //console.log("isRoomCreator:", isRoomCreator);
                     console.log("pendingOutgoingPeers:", pendingOutgoingPeers);
 
                 } catch (err) {
@@ -643,6 +687,68 @@
                     alert("Please allow microphone access to join the call.");
                 }
             });
+
+
+            let recorder;
+
+            function startTranslationStream(localStream, targetLang) {
+                if (!recorder || recorder.state === "inactive") {
+                    const mimeType = [
+                        "audio/webm;codecs=opus",
+                        "audio/webm",
+                        "audio/ogg;codecs=opus"
+                    ].find(type => MediaRecorder.isTypeSupported(type));
+
+                    recorder = new MediaRecorder(localStream, {mimeType});
+                    //console.log("📦 currentUserId:", currentUserId);
+                    console.log("📦 targetLang", targetLang);
+
+                    recorder.ondataavailable = async (event) => {
+                        const blob = event.data;
+                        const formData = new FormData();
+                        formData.append("audio", blob, "chunk.webm");
+                        formData.append("senderId", currentUserId);
+                        formData.append("targetLang", targetLang);
+                        //console.log("📦 Blob type:", blob.type, "Size:", blob.size);
+
+                        try {
+                            const res = await fetch("/translate-audio-realtime/", {
+                                method: "POST",
+                                body: formData
+                            });
+                            const result = await res.json();
+
+                            if (result.audio_url) {
+                                playTranslatedAudio(result.audio_url);
+                                //console.warn("⚠️ Audio URL returned:", result.audio_url);
+                            } else {
+                                //console.warn("⚠️ No audio URL returned:", result);
+                            }
+                        } catch (err) {
+                            console.error("❌ Translation request failed:", err);
+                        }
+                    };
+
+                    recorder.start(4000); // every 4 seconds
+                    //console.log("🎙️ Translation stream started");
+                } else {
+                    console.log("⏳ Recorder already active, skipping start");
+                }
+            }
+
+            function playTranslatedAudio(url) {
+                const audio = new Audio(url);
+                audio.autoplay = true;
+                audio.playsInline = true;
+                audio.muted = false;
+
+                audio.play().then(() => {
+                    console.log("✅ Translated audio playback started");
+                }).catch(err => {
+                    console.warn("⚠️ Playback failed:", err);
+                });
+            }
+
 
             if (leaveCallBtn) {
                 Object.values(peers).forEach(peer => peer.close());
@@ -909,7 +1015,10 @@
         }
 
         function attachRemoteAudio(userId, stream) {
-            let container = document.getElementById("audioContainer");
+            const container = document.getElementById("audioContainer");
+
+            // Check if audio element already exists
+            let audio = document.getElementById(`audio-${userId}`);
 
             if (!audio) {
                 audio = document.createElement("audio");
@@ -917,12 +1026,12 @@
                 audio.autoplay = true;
                 audio.playsInline = true;
                 audio.muted = false; // Ensure it's not muted
-                container.appendChild(audio);// Or attach to a dedicated container
+                container.appendChild(audio);
+                console.log(`🔧 Created audio element for ${userId}`);
             }
 
             audio.srcObject = stream;
 
-            // Confirm stream has audio tracks
             const tracks = stream.getAudioTracks();
             console.log(`🎧 Attaching stream to ${userId}:`, tracks);
 
@@ -930,7 +1039,6 @@
                 console.warn(`⚠️ No audio tracks found for ${userId}`);
             }
 
-            // Attempt playback
             audio.play().then(() => {
                 console.log(`✅ Audio playback started for ${userId}`);
             }).catch(err => {
