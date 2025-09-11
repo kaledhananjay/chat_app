@@ -23,7 +23,7 @@ from django.contrib.auth import get_user_model
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.core.cache import cache
-
+import re
 
 @login_required
 def chat_list_view(request):
@@ -556,92 +556,168 @@ def temploadchat(request):
 
     return JsonResponse({"messages": messages})
 
-
-# from django.views.decorators.csrf import csrf_exempt
-# from django.http import JsonResponse
-# from django.core.cache import cache
-# from deep_translator import GoogleTranslator
-# from gtts import gTTS
-# import speech_recognition as sr
-# import subprocess
-# import uuid
-# import os
-# from django.conf import settings
-
 @csrf_exempt
 def translate_audio_realtime(request):
-    if request.method != "POST" or "audio" not in request.FILES:
-        return JsonResponse({"error": "Invalid request"}, status=400)
+    try:
+        if request.method != "POST" or "audio" not in request.FILES:
+            return JsonResponse({"error": "Invalid request"}, status=400)
 
-    audio_file = request.FILES["audio"]
-    user_id = request.POST.get("senderId")
-    target_lang = request.POST.get("targetLang")
+        audio_file = request.FILES["audio"]
+        print(f"📥 Received blob size: {audio_file.size} bytes")
+        if audio_file.size == 64722:
+            print(f"⚠️ Skipping small blob: {audio_file.size} bytes")
+            return JsonResponse({
+                "translated": "",
+                "audio_url": "",
+                "error": "Blob too small to process"
+            }, status=200)
 
-    # print("📦 Uploaded file type:", audio_file.content_type)
-    # print("📥 Received audio from:", user_id)
-    # print("🌍 Target language:", target_lang)
-    
-    base_filename = str(uuid.uuid4())
-    webm_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.webm")
-    wav_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.wav")
-    # print("🔍 WAV file saved:", wav_path)
-    # print("📁 Saving to:", webm_path)
 
-    if audio_file.size > 3000:  # ~3KB
-    #    print("⚠️ Skipping small blob:", audio_file.size, "bytes")
-    #    return JsonResponse({"translated": "", "audio_url": ""}, status=200)
-    #else:
-        with open(webm_path, "wb") as f:
-            for chunk in audio_file.chunks():
-                f.write(chunk)
-
-        ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-i", webm_path,
-            "-acodec", "pcm_s16le",
-            "-ar", "16000",
-            "-ac", "1",
-            wav_path
-        ]
-        print("🎧 FFmpeg conversion complete:", wav_path)
-        result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        user_id = request.POST.get("senderId")
+        target_lang = request.POST.get("targetLang")
         
-    if result.returncode != 0 or not os.path.exists(wav_path):
-        # print("❌ FFmpeg failed or output file missing")
-        # print("🧾 FFmpeg stderr:", result.stderr.decode())
-        return JsonResponse({
-            "error": "FFmpeg conversion failed",
-            "details": result.stderr.decode(),
-        }, status=500)
-    # print("🎧 FFmpeg conversion complete:", wav_path)
+        base_filename = str(uuid.uuid4())
+        webm_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.webm")
+        wav_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.wav")
 
-    recognizer = sr.Recognizer()
-    try:
-        with sr.AudioFile(wav_path) as source:
-            audio = recognizer.record(source)
-        text = recognizer.recognize_google(audio)
-        # print("🗣️ Recognized text:", text)
-    except sr.UnknownValueError:
-        return JsonResponse({"error": "Speech not understood"}, status=422)
-    except Exception as e:
-        return JsonResponse({"error": f"STT failed: {e}"}, status=500)
+        if audio_file.size > 3000:  # ~3KB
+            with open(webm_path, "wb") as f:
+                for chunk in audio_file.chunks():
+                    f.write(chunk)
 
-    try:
-        translated = GoogleTranslator(source="auto", target=target_lang).translate(text)
-        print("🌐 Translated text:", translated)
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-i", webm_path,
+                "-acodec", "pcm_s16le",
+                "-ar", "16000",
+                "-ac", "1",
+                wav_path
+            ]
+            print("🎧 FFmpeg conversion complete:", wav_path)
+            print(f"📦 WebM file webm_path: {webm_path} bytes")
+            webm_size = os.path.getsize(webm_path)
+            print(f"📦 WebM file size: {webm_size} bytes")
+            if webm_size == 64722:
+                print("🤫 WebM chunk too small, likely silent or clipped")
+                return JsonResponse({
+                    "translated": "",
+                    "audio_url": "",
+                    "error": "WebM chunk too small"
+                }, status=200)
+        try:
+            result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0 or not os.path.exists(wav_path):
+                raise RuntimeError(result.stderr.decode())
+            # print("🤫 Silence detection started........")
+            # volume_check = subprocess.run([
+            #     "ffmpeg",
+            #     "-hide_banner",
+            #     "-loglevel", "info",
+            #     "-i", wav_path,
+            #     "-af", "volumedetect",
+            #     "-f", "null", "-"
+            # ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            # stderr_output = volume_check.stderr.decode()
+
+            # match = re.search(r"mean_volume: (-?\d+\.\d+) dB", stderr_output)
+            # print("🔊 Match:", match)
+            # if match:
+            #     mean_volume = float(match.group(1))
+            #     print("🔊 Mean volume:", mean_volume)
+
+            #     if mean_volume < -45.0:
+            #         print("🤫 Low-volume chunk, skipping translation")
+            #         return JsonResponse({
+            #             "translated": "",
+            #             "audio_url": "",
+            #             "error": "Low-volume chunk"
+            #         }, status=200)
+            #     else:
+            #         print("⚠️ Could not extract mean_volume from FFmpeg output")
+
+            # # silence_check = subprocess.run([
+            # #     "ffmpeg",
+            # #     "-hide_banner",
+            # #     "-loglevel", "debug",
+            # #     "-i", wav_path,
+            # #     "-af", "silencedetect=n=-60dB:d=0.5",
+            # #     "-f", "null", "-"
+            # # ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            # # stderr_output = silence_check.stderr.decode()
+            # # print("🔍 Silence check output:", stderr_output)
+
+            # # if "silence_start" in stderr_output or "silence_duration" in stderr_output:
+            # #     print("🤫 Silence detected, skipping translation")
+            # #     return JsonResponse({
+            # #         "translated": "",
+            # #         "audio_url": "",
+            # #         "error": "Silent chunk"
+            # #     }, status=200)
+            # print("🤫 Silence detection finished........")
+        except Exception as e:
+            #print("❌ FFmpeg failed:", e)
+            return JsonResponse({
+                "translated": "",
+                "audio_url": "",
+                "error": "FFmpeg conversion failed",
+                "details": str(e)
+            }, status=200)
+
+        if result.returncode != 0 or not os.path.exists(wav_path):
+            return JsonResponse({
+                "error": "FFmpeg conversion failed",
+                "details": result.stderr.decode(),
+            }, status=500)
+
+        recognizer = sr.Recognizer()
+        try:
+            with sr.AudioFile(wav_path) as source:
+                audio = recognizer.record(source)
+            text = recognizer.recognize_google(audio)
+        except sr.UnknownValueError:
+            return JsonResponse({"error": "Speech not understood"}, status=422)
+        except Exception as e:
+            return JsonResponse({"error": f"STT failed: {e}"}, status=500)
+
+        try:
+            translated = GoogleTranslator(source="auto", target=target_lang).translate(text)
+            print("🌐 Translated text:", translated)
+            if not translated.strip():
+                return JsonResponse({"error": "Translation empty", "translated": "", "audio_url": ""}, status=200)
+        except Exception as e:
+                return JsonResponse({"error": f"Translation failed: {e}"}, status=500)
+
         if not translated.strip():
-            return JsonResponse({"error": "Translation empty", "translated": "", "audio_url": ""}, status=200)
+            print("⚠️ Empty translation, skipping TTS")
+            return JsonResponse({
+                "translated": "",
+                "audio_url": "",
+                "error": "Translation was empty"
+            }, status=200)
+        try:
+            mp3_path = wav_path.replace(".wav", f"_{target_lang}.mp3")
+            tts = gTTS(translated, lang=target_lang)
+            tts.save(mp3_path)
+            # print("🔊 TTS audio saved:", mp3_path)
+
+        except Exception as e:
+            print("❌ TTS failed:", e)
+            return JsonResponse({
+                "translated": translated,
+                "audio_url": "",
+                "error": "TTS synthesis failed",
+                "details": str(e)
+            }, status=200)
+
+        audio_url = f"/media/{os.path.basename(mp3_path)}"
+        return JsonResponse({"translated": translated, "audio_url": audio_url})
     except Exception as e:
-            return JsonResponse({"error": f"Translation failed: {e}"}, status=500)
-
-    try:
-        mp3_path = wav_path.replace(".wav", f"_{target_lang}.mp3")
-        tts = gTTS(translated, lang=target_lang)
-        tts.save(mp3_path)
-        # print("🔊 TTS audio saved:", mp3_path)
-
-    except Exception as e:
-        return JsonResponse({"error": f"TTS failed: {e}"}, status=500)
-
-    audio_url = f"/media/{os.path.basename(mp3_path)}"
-    return JsonResponse({"translated": translated, "audio_url": audio_url})
+        print("🔥 Unexpected error:", e)
+        return JsonResponse({
+            "translated": "",
+            "audio_url": "",
+            "error": "Unexpected server error",
+            "details": str(e)
+        }, status=200)
