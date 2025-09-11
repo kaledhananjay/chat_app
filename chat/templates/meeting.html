@@ -283,6 +283,11 @@
             let roomCreatorId;
             const pendingICECandidates = {};
             let isRoomCreator;
+            let mediaRecorder;
+            let recordingInterval;
+            let isTranslationActive = false;
+
+            document.getElementById("endCallBtn").addEventListener("click", stopTranslationStream);
 
             async function setupPeerConnection(targetUser, isOfferer = false, remoteSDP = null) {
                 if (peers[targetUser]) return peers[targetUser];
@@ -702,6 +707,11 @@
 
             function startTranslationStream(localStream, targetLang) {
                 if (!recorder || recorder.state === "inactive") {
+                    if (isTranslationActive) {
+                        console.log("⏳ Translation already active");
+                        return;
+                    }
+
                     const mimeType = [
                         "audio/webm;codecs=opus",
                         "audio/webm",
@@ -709,16 +719,17 @@
                     ].find(type => MediaRecorder.isTypeSupported(type));
 
                     recorder = new MediaRecorder(localStream, { mimeType });
-                    //console.log("📦 currentUserId:", currentUserId);
+                    isTranslationActive = true;
                     console.log("📦 targetLang", targetLang);
 
                     recorder.ondataavailable = async (event) => {
                         const blob = event.data;
+                        if (blob.size < 1000) return;
+
                         const formData = new FormData();
                         formData.append("audio", blob, "chunk.webm");
                         formData.append("senderId", currentUserId);
                         formData.append("targetLang", targetLang);
-                        //console.log("📦 Blob type:", blob.type, "Size:", blob.size);
 
                         try {
                             const res = await fetch("/translate-audio-realtime/", {
@@ -729,17 +740,24 @@
 
                             if (result.audio_url) {
                                 playTranslatedAudio(result.audio_url);
-                                //console.warn("⚠️ Audio URL returned:", result.audio_url);
                             } else {
-                                //console.warn("⚠️ No audio URL returned:", result);
+                                console.log("⚠️ Skipped chunk:", result.error);
                             }
                         } catch (err) {
                             console.error("❌ Translation request failed:", err);
                         }
                     };
 
-                    recorder.start(4000); // every 4 seconds
-                    //console.log("🎙️ Translation stream started");
+                    recorder.start(4000);
+
+                    recordingInterval = setInterval(() => {
+                        if (recorder && recorder.state === "recording") {
+                            recorder.stop();
+                            recorder.start(4000);
+                        }
+                    }, 4000);
+                    console.log("🎙️ Translation stream started");
+
                 } else {
                     console.log("⏳ Recorder already active, skipping start");
                 }
@@ -758,198 +776,215 @@
                 });
             }
 
+            function stopTranslationStream() {
+                if (recorder && recorder.state !== "inactive") {
+                    recorder.stop();
+                    clearInterval(recordingInterval);
+                    recorder = null;
+                    console.log("🛑 Recorder stopped");
+                }
+
+                if (localStream) {
+                    localStream.getTracks().forEach(track => {
+                        track.stop(); // 🔇 This releases the mic
+                    });
+                    localStream = null; // 🧹 Clear reference
+                    console.log("🎤 Microphone stream fully released");
+                }
+            }
+
 
             if (leaveCallBtn) {
-                Object.values(peers).forEach(peer => peer.close());
-                for (const userId in peers) {
-                    const audio = document.getElementById(`audio-${userId}`);
-                    if (audio) audio.remove();
-                    //removeParticipant(userId);
+            Object.values(peers).forEach(peer => peer.close());
+            for (const userId in peers) {
+                const audio = document.getElementById(`audio-${userId}`);
+                if (audio) audio.remove();
+                //removeParticipant(userId);
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            document.getElementById("startCallBtn").style.display = "inline-block";
+        } else {
+            console.warn("⚠️ leaveCallBtn not found in DOM");
+        }
+
+        if (muteToggleBtn) {
+            muteToggleBtn.addEventListener("click", () => {
+                console.warn("⚠️ In muteToggleBtn click");
+                if (!localStream) return;
+                localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
+                isMuted = !isMuted;
+                console.warn("⚠️ After !localStream");
+                muteToggleBtn.textContent = isMuted ? "Unmute" : "Mute";
+
+                // Update mic icon
+                const micIcon = document.querySelector(`#participant-${username} .mic-status`);
+                if (micIcon) {
+                    micIcon.innerHTML = isMuted ? "🔇" : "🎙️";
                 }
-                if (localStream) {
-                    localStream.getTracks().forEach(track => track.stop());
-                    localStream = null;
-                }
-                document.getElementById("startCallBtn").style.display = "inline-block";
-            } else {
-                console.warn("⚠️ leaveCallBtn not found in DOM");
+            });
+        } else {
+            console.warn("⚠️ muteToggleBtn not found in DOM");
+        }
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            const currentUserId = document.getElementById("meeting-container").dataset.userId;
+            if (data.type === "chat") {
+                const chatBox = document.getElementById("chatMessages");
+                const msg = document.createElement("div");
+                msg.textContent = `${data.sender}: ${data.message}`;
+                chatBox.appendChild(msg);
+                chatBox.scrollTop = chatBox.scrollHeight;
             }
 
-            if (muteToggleBtn) {
-                muteToggleBtn.addEventListener("click", () => {
-                    console.warn("⚠️ In muteToggleBtn click");
-                    if (!localStream) return;
-                    localStream.getAudioTracks().forEach(track => track.enabled = isMuted);
-                    isMuted = !isMuted;
-                    console.warn("⚠️ After !localStream");
-                    muteToggleBtn.textContent = isMuted ? "Unmute" : "Mute";
-
-                    // Update mic icon
-                    const micIcon = document.querySelector(`#participant-${username} .mic-status`);
-                    if (micIcon) {
-                        micIcon.innerHTML = isMuted ? "🔇" : "🎙️";
-                    }
+            else if (data.type === "user_joined") {
+                console.log(`👤 User ${data.username} joined`);
+                const participantBox = document.getElementById("participants");
+                const li = document.createElement("li");
+                li.textContent = data.username;
+                participantBox.appendChild(li);  // ✅ fixed variable name
+            }
+            else if (data.type === "receive_invite") {
+                console.log(`📨 Invite from ${data.from} to join room ${data.room}`);
+                console.log(`📥 Meeting invite received from 3`);
+                showInviteModal({
+                    sender: data.from,
+                    room: data.room
                 });
-            } else {
-                console.warn("⚠️ muteToggleBtn not found in DOM");
             }
 
-            socket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                const currentUserId = document.getElementById("meeting-container").dataset.userId;
-                if (data.type === "chat") {
-                    const chatBox = document.getElementById("chatMessages");
-                    const msg = document.createElement("div");
-                    msg.textContent = `${data.sender}: ${data.message}`;
-                    chatBox.appendChild(msg);
-                    chatBox.scrollTop = chatBox.scrollHeight;
+            else if (data.type === "meeting_invite") {
+                if (data.target === currentUserId) {
+                    // ✅ Only redirect the invited user
+                    window.location.href = `/meeting/${data.room}/${data.sender}/`;
+                    console.log(`ℹ️ Invite was for ${data.target}, not ${currentUserId}`);
+                } else {
+                    // Optional: show a toast or log
+                    //console.log(`ℹ️ Invite was for ${data.target}, not ${currentUserId}`);
                 }
+            }
+            else if (data.type === "invite") {
+                console.log(`📥 Meeting invite received from 4`);
+                showInviteModal({
+                    id: data.invite_id,
+                    sender: data.sender,
+                    room: data.room
+                });
+            }
+        };
 
-                else if (data.type === "user_joined") {
-                    console.log(`👤 User ${data.username} joined`);
-                    const participantBox = document.getElementById("participants");
-                    const li = document.createElement("li");
-                    li.textContent = data.username;
-                    participantBox.appendChild(li);  // ✅ fixed variable name
-                }
-                else if (data.type === "receive_invite") {
-                    console.log(`📨 Invite from ${data.from} to join room ${data.room}`);
-                    console.log(`📥 Meeting invite received from 3`);
-                    showInviteModal({
-                        sender: data.from,
-                        room: data.room
-                    });
-                }
+        function showInviteModal(roomName, inviterId) {
+            console.log(`📥 Meeting invite received from qq`);
+            const modal = document.getElementById("invite-modal");
+            document.getElementById("inviter-name").textContent = inviterId;
+            document.getElementById("invite-room").textContent = roomName;
 
-                else if (data.type === "meeting_invite") {
-                    if (data.target === currentUserId) {
-                        // ✅ Only redirect the invited user
-                        window.location.href = `/meeting/${data.room}/${data.sender}/`;
-                        console.log(`ℹ️ Invite was for ${data.target}, not ${currentUserId}`);
-                    } else {
-                        // Optional: show a toast or log
-                        //console.log(`ℹ️ Invite was for ${data.target}, not ${currentUserId}`);
-                    }
-                }
-                else if (data.type === "invite") {
-                    console.log(`📥 Meeting invite received from 4`);
-                    showInviteModal({
-                        id: data.invite_id,
-                        sender: data.sender,
-                        room: data.room
-                    });
-                }
+            modal.classList.remove("hidden");
+
+            document.getElementById("accept-invite-btn").onclick = () => {
+                window.location.href = `/meeting/${roomName}/${currentUserId}/`;
+                cuserId = currentUserId;
+                console.log("currentUserId accept-invite-btn : ", cuserId)
             };
 
-            function showInviteModal(roomName, inviterId) {
-                console.log(`📥 Meeting invite received from qq`);
-                const modal = document.getElementById("invite-modal");
-                document.getElementById("inviter-name").textContent = inviterId;
-                document.getElementById("invite-room").textContent = roomName;
+            document.getElementById("decline-invite-btn").onclick = () => {
+                modal.classList.add("hidden");
+            };
+        }
 
-                modal.classList.remove("hidden");
+        function fetchPendingInvites() {
+            fetch("/api/invites/pending/")
+                .then(res => res.json())
+                .then(data => {
+                    const invites = data.invites;
+                    if (invites.length === 0) {
+                        console.log("📭 No pending invites");
+                        return;
+                    }
 
-                document.getElementById("accept-invite-btn").onclick = () => {
-                    window.location.href = `/meeting/${roomName}/${currentUserId}/`;
-                    cuserId = currentUserId;
-                    console.log("currentUserId accept-invite-btn : ", cuserId)
-                };
-
-                document.getElementById("decline-invite-btn").onclick = () => {
-                    modal.classList.add("hidden");
-                };
-            }
-
-            function fetchPendingInvites() {
-                fetch("/api/invites/pending/")
-                    .then(res => res.json())
-                    .then(data => {
-                        const invites = data.invites;
-                        if (invites.length === 0) {
-                            console.log("📭 No pending invites");
-                            return;
-                        }
-
-                        invites.forEach(invite => {
-                            showInvitePopup(invite);
-                        });
-                    })
-                    .catch(err => console.error("❌ Error fetching invites:", err));
-            }
-
-            function showInviteModal(invite) {
-                console.log(`📥 Meeting invite received from XX`);
-                document.getElementById("inviter-name").textContent = invite.sender;
-                document.getElementById("invite-room").textContent = invite.room;
-
-                const modal = document.getElementById("invite-modal");
-                modal.classList.remove("hidden");
-
-                // Attach handlers
-                document.getElementById("accept-invite-btn").onclick = () => respondToInvite(invite.id, "accept");
-                document.getElementById("decline-invite-btn").onclick = () => respondToInvite(invite.id, "reject");
-            }
-
-            function respondToInvite(inviteId, action) {
-                fetch("/api/invites/respond/", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ invite_id: inviteId, action: action })
+                    invites.forEach(invite => {
+                        showInvitePopup(invite);
+                    });
                 })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success) {
-                            console.log(`✅ Invite ${action}ed`);
+                .catch(err => console.error("❌ Error fetching invites:", err));
+        }
 
-                            // Hide modal
-                            document.getElementById("invite-modal").classList.add("hidden");
+        function showInviteModal(invite) {
+            console.log(`📥 Meeting invite received from XX`);
+            document.getElementById("inviter-name").textContent = invite.sender;
+            document.getElementById("invite-room").textContent = invite.room;
 
-                            // Redirect if accepted
-                            if (action === "accept" && data.room) {
-                                window.location.href = `/meeting/${data.room}/`;
-                            }
+            const modal = document.getElementById("invite-modal");
+            modal.classList.remove("hidden");
 
-                            // Optionally notify inviter via WebSocket
-                            if (window.socket) {
-                                socket.send(JSON.stringify({
-                                    type: "invite_response",
-                                    target: data.sender,
-                                    status: action
-                                }));
-                            }
-                        } else {
-                            console.error("❌ Invite response failed:", data.error);
+            // Attach handlers
+            document.getElementById("accept-invite-btn").onclick = () => respondToInvite(invite.id, "accept");
+            document.getElementById("decline-invite-btn").onclick = () => respondToInvite(invite.id, "reject");
+        }
+
+        function respondToInvite(inviteId, action) {
+            fetch("/api/invites/respond/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ invite_id: inviteId, action: action })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log(`✅ Invite ${action}ed`);
+
+                        // Hide modal
+                        document.getElementById("invite-modal").classList.add("hidden");
+
+                        // Redirect if accepted
+                        if (action === "accept" && data.room) {
+                            window.location.href = `/meeting/${data.room}/`;
                         }
-                    })
-                    .catch(err => console.error("❌ Error responding to invite:", err));
+
+                        // Optionally notify inviter via WebSocket
+                        if (window.socket) {
+                            socket.send(JSON.stringify({
+                                type: "invite_response",
+                                target: data.sender,
+                                status: action
+                            }));
+                        }
+                    } else {
+                        console.error("❌ Invite response failed:", data.error);
+                    }
+                })
+                .catch(err => console.error("❌ Error responding to invite:", err));
+        }
+
+        const chatInput = document.getElementById("chatInput");
+        //console.log("chatInput:", chatInput);
+        if (chatInput) {
+            chatInput.addEventListener("keypress", (e) => {
+                if (e.key === "Enter") sendChatMessage();
+            });
+        } else {
+            console.warn("⚠️ chatInput not found");
+        }
+
+        const chatMessages = document.getElementById("chatMessages");
+
+        const userList = document.getElementById("userList");
+
+        function sendChatMessage() {
+            const input = document.getElementById("chatInput");
+            const message = input.value.trim();
+            if (message) {
+                socket.send(JSON.stringify({
+                    type: "chat",
+                    sender: username,
+                    message: message
+                }));
+                input.value = "";
             }
-
-            const chatInput = document.getElementById("chatInput");
-            //console.log("chatInput:", chatInput);
-            if (chatInput) {
-                chatInput.addEventListener("keypress", (e) => {
-                    if (e.key === "Enter") sendChatMessage();
-                });
-            } else {
-                console.warn("⚠️ chatInput not found");
-            }
-
-            const chatMessages = document.getElementById("chatMessages");
-
-            const userList = document.getElementById("userList");
-
-            function sendChatMessage() {
-                const input = document.getElementById("chatInput");
-                const message = input.value.trim();
-                if (message) {
-                    socket.send(JSON.stringify({
-                        type: "chat",
-                        sender: username,
-                        message: message
-                    }));
-                    input.value = "";
-                }
-            }
+        }
         });
 
         document.querySelectorAll(".invite-btn").forEach(button => {
