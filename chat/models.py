@@ -34,7 +34,8 @@ class MeetingInvite(models.Model):
     target = models.ForeignKey(User, on_delete=models.CASCADE, related_name="received_invites")
     room = models.CharField(max_length=255)
     timestamp = models.DateTimeField(auto_now_add=True)
-    
+    preferred_lang = models.CharField(max_length=10, default="en")
+
     def __str__(self):
         return f"{self.sender} invited {self.target} to {self.room}"
 

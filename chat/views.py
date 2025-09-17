@@ -24,6 +24,12 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.core.cache import cache
 import re
+from utils.redis_client import redis_client
+from utils.tts_cache import get_tts_cached
+
+# Example usage
+redis_client.set("mykey", "myvalue")
+value = redis_client.get("mykey")
 
 @login_required
 def chat_list_view(request):
@@ -608,54 +614,6 @@ def translate_audio_realtime(request):
             result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0 or not os.path.exists(wav_path):
                 raise RuntimeError(result.stderr.decode())
-            # print("🤫 Silence detection started........")
-            # volume_check = subprocess.run([
-            #     "ffmpeg",
-            #     "-hide_banner",
-            #     "-loglevel", "info",
-            #     "-i", wav_path,
-            #     "-af", "volumedetect",
-            #     "-f", "null", "-"
-            # ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-            # stderr_output = volume_check.stderr.decode()
-
-            # match = re.search(r"mean_volume: (-?\d+\.\d+) dB", stderr_output)
-            # print("🔊 Match:", match)
-            # if match:
-            #     mean_volume = float(match.group(1))
-            #     print("🔊 Mean volume:", mean_volume)
-
-            #     if mean_volume < -45.0:
-            #         print("🤫 Low-volume chunk, skipping translation")
-            #         return JsonResponse({
-            #             "translated": "",
-            #             "audio_url": "",
-            #             "error": "Low-volume chunk"
-            #         }, status=200)
-            #     else:
-            #         print("⚠️ Could not extract mean_volume from FFmpeg output")
-
-            # # silence_check = subprocess.run([
-            # #     "ffmpeg",
-            # #     "-hide_banner",
-            # #     "-loglevel", "debug",
-            # #     "-i", wav_path,
-            # #     "-af", "silencedetect=n=-60dB:d=0.5",
-            # #     "-f", "null", "-"
-            # # ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-            # # stderr_output = silence_check.stderr.decode()
-            # # print("🔍 Silence check output:", stderr_output)
-
-            # # if "silence_start" in stderr_output or "silence_duration" in stderr_output:
-            # #     print("🤫 Silence detected, skipping translation")
-            # #     return JsonResponse({
-            # #         "translated": "",
-            # #         "audio_url": "",
-            # #         "error": "Silent chunk"
-            # #     }, status=200)
-            # print("🤫 Silence detection finished........")
         except Exception as e:
             #print("❌ FFmpeg failed:", e)
             return JsonResponse({
@@ -697,9 +655,11 @@ def translate_audio_realtime(request):
                 "error": "Translation was empty"
             }, status=200)
         try:
-            mp3_path = wav_path.replace(".wav", f"_{target_lang}.mp3")
-            tts = gTTS(translated, lang=target_lang)
-            tts.save(mp3_path)
+            mp3_path = get_tts_cached(translated, target_lang)
+            audio_url = f"/media/{os.path.basename(mp3_path)}"
+            # mp3_path = wav_path.replace(".wav", f"_{target_lang}.mp3")
+            # tts = gTTS(translated, lang=target_lang)
+            # tts.save(mp3_path)
             # print("🔊 TTS audio saved:", mp3_path)
 
         except Exception as e:
@@ -710,8 +670,7 @@ def translate_audio_realtime(request):
                 "error": "TTS synthesis failed",
                 "details": str(e)
             }, status=200)
-
-        audio_url = f"/media/{os.path.basename(mp3_path)}"
+            
         return JsonResponse({"translated": translated, "audio_url": audio_url})
     except Exception as e:
         print("🔥 Unexpected error:", e)
@@ -721,3 +680,30 @@ def translate_audio_realtime(request):
             "error": "Unexpected server error",
             "details": str(e)
         }, status=200)
+
+async def send_translated_audio(self, sender_id, audio_url, translated_text, target_lang):
+    await self.channel_layer.group_send(
+        "meeting_room",  # or use dynamic room name
+        {
+            "type": "translated.audio",
+            "senderId": sender_id,
+            "audio_url": audio_url,
+            "translated_text": translated_text,
+            "target_lang": target_lang
+        }
+    )
+    
+@csrf_exempt
+def set_language(request):
+    data = json.loads(request.body)
+    user_id = data.get("userId")
+    lang = data.get("language")
+    room = data.get("room")
+
+    try:
+        invite = MeetingInvite.objects.get(target__id=user_id, room=room)
+        invite.preferred_lang = lang
+        invite.save()
+        return JsonResponse({"status": "ok"})
+    except MeetingInvite.DoesNotExist:
+        return JsonResponse({"error": "Invite not found"}, status=404)

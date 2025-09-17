@@ -204,7 +204,6 @@ class MeetingConsumer(AsyncJsonWebsocketConsumer):
         except Exception as e:
             print("❌ Exception in receive_json:", str(e))
             await self.close(code=1011)
-       
 
     async def voice_answer(self, event):
         await self.send(text_data=json.dumps({
@@ -220,6 +219,16 @@ class MeetingConsumer(AsyncJsonWebsocketConsumer):
             "to": event["to"],
             "candidate": event["candidate"]
         }))
+
+    async def translated_audio(self, event):
+        await self.send_json({
+            "type": "translated_audio_ready",
+            "senderId": event["senderId"],
+            "audio_url": event["audio_url"],
+            "translated_text": event["translated_text"],
+            "target_lang": event["target_lang"]
+        })
+
         
 class FallbackConsumer(AsyncWebsocketConsumer):
     async def connect(self):
