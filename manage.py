@@ -25,7 +25,6 @@ if __name__ == '__main__':
  #!/usr/bin/env python
 import os
 import sys
-#sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 def main():
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'chat_app.settings')

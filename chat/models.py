@@ -35,8 +35,6 @@ class MeetingInvite(models.Model):
     room = models.CharField(max_length=255)
     timestamp = models.DateTimeField(auto_now_add=True)
     preferred_lang = models.CharField(max_length=10, default="en")
-    joined = models.BooleanField(default=False)  # ✅ new field
-
 
     def __str__(self):
         return f"{self.sender} invited {self.target} to {self.room}"
