@@ -562,6 +562,8 @@ def temploadchat(request):
 
     return JsonResponse({"messages": messages})
 
+# translate_audio_realtime (Text-to-Speech (TTS))
+# Save the output translated audio file path by Caching
 @csrf_exempt
 def translate_audio_realtime(request):
     try:
