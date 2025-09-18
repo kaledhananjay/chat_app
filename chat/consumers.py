@@ -3,6 +3,12 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 import json
 from django.core.cache import cache
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
+import traceback
+from .models import MeetingInvite
+from redis_utils import add_participant
+from channels.db import database_sync_to_async
+from django.db.models import Q
+
 
 # Global in-memory store for participants per room
 ROOM_PARTICIPANTS = {}
@@ -10,33 +16,81 @@ ROOM_PARTICIPANTS = {}
 class MeetingConsumer(AsyncJsonWebsocketConsumer):
 #class MeetingConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        try:     
+        try:
             print("🧠 MeetingConsumer connected for:", self.scope["path"])
-            self.room_name = self.scope["url_route"]["kwargs"]["room_name"]
+
+            # Extract room and user
+            self.room_name = self.scope["url_route"]["kwargs"].get("room_name")
             self.user = self.scope["user"]
-            self.user_group = f"user_{self.user.id}"
-            self.room_group_name = f"chat_{self.room_name}"
-            if self.user.is_anonymous:
+
+            if not self.room_name or self.user.is_anonymous:
+                print("❌ Invalid room or anonymous user")
                 await self.close()
                 return
+
+            self.user_group = f"user_{self.user.id}"
+            self.room_group_name = f"chat_{self.room_name}"
+
+            # Add to channel groups
             await self.channel_layer.group_add(self.user_group, self.channel_name)
             await self.channel_layer.group_add(self.room_group_name, self.channel_name)
             await self.accept()
-            print(f"✅ Connected: {self.user.username} added to {self.user_group} in room {self.room_name}")
-            
-            # Add user to Redis-backed participant list
-            add_participant(self.room_name, self.user)
 
-            # Broadcast updated list to all users in room
+            print(f"✅ Connected: {self.user.username} added to {self.user_group} in room {self.room_name}")
+
+            # Mark user as joined in DB
+            await self.mark_user_joined(self.room_name, self.user)
+
+            # Add to Redis participant list
+            add_participant(self.room_name, self.user)
+            print(f"🗂️ Redis participant added: {self.user.username} → {self.room_name}")
+
+            # Broadcast updated participant list
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     "type": "participant_update"
                 }
             )
+
+            # Send list to current user
             await self.send_participant_list()
+
         except Exception as e:
             print("❌ Exception in connect:", str(e))
+            traceback.print_exc()
+
+    @database_sync_to_async
+    def mark_user_joined(self, room, user):
+        MeetingInvite.objects.filter(Q(room=room), Q(target=user)).update(joined=True)
+    # async def connect(self):
+    #     try:     
+    #         print("🧠 MeetingConsumer connected for:", self.scope["path"])
+    #         self.room_name = self.scope["url_route"]["kwargs"]["room_name"]
+    #         self.user = self.scope["user"]
+    #         self.user_group = f"user_{self.user.id}"
+    #         self.room_group_name = f"chat_{self.room_name}"
+    #         if self.user.is_anonymous:
+    #             await self.close()
+    #             return
+    #         await self.channel_layer.group_add(self.user_group, self.channel_name)
+    #         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+    #         await self.accept()
+    #         print(f"✅ Connected: {self.user.username} added to {self.user_group} in room {self.room_name}")
+            
+    #         # Add user to Redis-backed participant list
+    #         add_participant(self.room_name, self.user)
+
+    #         # Broadcast updated list to all users in room
+    #         await self.channel_layer.group_send(
+    #             self.room_group_name,
+    #             {
+    #                 "type": "participant_update"
+    #             }
+    #         )
+    #         await self.send_participant_list()
+    #     except Exception as e:
+    #         print("❌ Exception in connect:", str(e))
 
 
     # async def receive(self, text_data):
