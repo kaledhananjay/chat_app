@@ -660,6 +660,8 @@ def translate_audio_realtime(request):
         try:
             mp3_path = get_tts_cached(translated, target_lang)
             audio_url = f"/media/{os.path.basename(mp3_path)}"
+            print("📁 Final MP3 path:", mp3_path)
+            print("📦 Exists:", os.path.exists(mp3_path))
             # mp3_path = wav_path.replace(".wav", f"_{target_lang}.mp3")
             # tts = gTTS(translated, lang=target_lang)
             # tts.save(mp3_path)
@@ -713,3 +715,15 @@ def set_language(request):
         return JsonResponse({"status": "ok"})
     except MeetingInvite.DoesNotExist:
         return JsonResponse({"error": "Invite not found"}, status=404)
+    
+
+def get_preferred_language(request):
+    user_id = request.GET.get("userId")
+    room = request.GET.get("room")
+
+    try:
+        invite = MeetingInvite.objects.get(target_id=user_id, room=room)
+        return JsonResponse({"preferred_lang": invite.preferred_lang})
+    except MeetingInvite.DoesNotExist:
+        return JsonResponse({"error": "Invite not found"}, status=404)
+

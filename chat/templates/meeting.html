@@ -7,7 +7,7 @@
     <title>Meeting Room - {{ room_name }}</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css"> 
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <style>
         body {
             padding: 20px;
@@ -277,7 +277,7 @@
             const pendingIncomingOffers = [];
             let localStream = null;
             const peers = {};
-            
+
             roomNameN = roomName
             let isMuted = false;
             const participants = new Set();
@@ -458,7 +458,11 @@
 
                         const response = await fetch(`/api/invite/${roomName}/`);
                         const result = await response.json();
-
+                        //console.log("Invite result:...",result)
+                        //const objresult = JSON.parse(result.invite);
+                        const target_id = result.invite.target_id;
+                        //Here too
+                        sessionStorage.setItem("resulttarget_id", target_id);
                         if (result.status === "ok") {
                             const invite = result.invite;
                             roomCreatorId = invite.sender_id;
@@ -527,7 +531,11 @@
 
                     // Optional: show transcript
                     //showSubtitle(data.translated_text, data.senderId, data.target_lang);
+                } else if (data.type === "language.change") {
+                    sessionStorage.setItem("targetLang", data.targetLanguage);
+                    console.log("🌍 Synced target language:", data.targetLanguage);
                 }
+
             };
 
             function bufferICECandidate(fromUserId, candidate) {
@@ -667,8 +675,36 @@
                     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     window.localStream = localStream;
                     console.log("🎙️ Mic access granted");
-                    const targetLang = sessionStorage.getItem("targetLang") || "en";
-                    //console.log("🌍 Translation target language:", targetLang);
+                    //Here cuserId
+                    //sessionStorage.setItem("resulttarget_id", target_id);
+                    const currentUserId = sessionStorage.getItem("resulttarget_id");
+                    const currentRoomName = sessionStorage.getItem("currentRoomName");
+                    console.log("👤 User:", currentUserId, "📁 Room:", currentRoomName);
+
+                    // 🛰️ Step 1: Fetch preferred_lang from backend
+                    const langResponse = await fetch(`/get_preferred_language?userId=${currentUserId}&room=${currentRoomName}`);
+                    const langData = await langResponse.json();
+                    const targetLang = langData.preferred_lang || "en"; // fallback to 'en' if not found
+                    sessionStorage.setItem("targetLang", targetLang);
+                    console.log("🌍 Translation target language:", targetLang);
+
+                    // 🔊 Step 2: Send language info via WebSocket
+                    if (meetingSocket && meetingSocket.readyState === WebSocket.OPEN) {
+                        meetingSocket.send(JSON.stringify({
+                            type: "language.change",
+                            userId: currentUserId,
+                            room: currentRoomName,
+                            targetLanguage: targetLang
+                        }));
+                    } else {
+                        console.warn("⚠️ meetingSocket not ready. Call start message skipped.");
+                    }
+
+
+                    // const targetLang = sessionStorage.getItem("targetLang") || "en";
+                    // //const tarLang = sessionStorage.getItem("targetLang");
+                    // console.log("🌍 Translation target language:", targetLang);
+                    // //console.log("🌍 Translation target language tarLang:", tarLang);
 
                     startTranslationStream(localStream, targetLang);
 
@@ -681,7 +717,6 @@
                     } else {
                         console.warn("⚠️ WebSocket not open. Skipping send.");
                     }
-
 
                     // ✅ Flush based on role
                     if (isRoomCreator) {
@@ -733,7 +768,7 @@
                     recorder = new MediaRecorder(localStream, { mimeType });
                     isTranslationActive = true;
                     console.log("📦 targetLang", targetLang);
-
+                    console.log("📦 currentUserId", currentUserId);
                     recorder.ondataavailable = async (event) => {
                         const blob = event.data;
                         if (blob.size < 1000) return;
@@ -867,7 +902,6 @@
                         room: data.room
                     });
                 }
-
                 else if (data.type === "meeting_invite") {
                     if (data.target === currentUserId) {
                         // ✅ Only redirect the invited user
@@ -879,7 +913,7 @@
                     }
                 }
                 else if (data.type === "invite") {
-                    console.log(`📥 Meeting invite received from 4`);
+                    console.log(`📥 Meeting invite received from `, data.invite_id);
                     showInviteModal({
                         id: data.invite_id,
                         sender: data.sender,
@@ -899,6 +933,7 @@
                 document.getElementById("accept-invite-btn").onclick = () => {
                     window.location.href = `/meeting/${roomName}/${currentUserId}/`;
                     cuserId = currentUserId;
+                    sessionStorage.setItem("cuserId", cuserId);
                     console.log("currentUserId accept-invite-btn : ", cuserId)
                 };
 
@@ -997,6 +1032,26 @@
                     input.value = "";
                 }
             }
+
+            // function changeLanguage(lang) {
+            //     const currentUserId = sessionStorage.getItem("currentUserId");
+            //     const currentRoomName = sessionStorage.getItem("currentRoomName");
+            //     sessionStorage.setItem("targetLang", lang);
+
+            //     //console.log("🌍 Language selected:", lang);
+            //     //console.log("👤 User:", currentUserId, "📁 Room:", currentRoomName);
+
+            //     fetch("/set_language", {
+            //         method: "POST",
+            //         headers: { "Content-Type": "application/json" },
+            //         body: JSON.stringify({ userId: currentUserId, language: lang, room: currentRoomName })
+            //     }).then(() => {
+            //         console.log("🌍 Language preference saved:", lang);
+            //     }).catch((err) => {
+            //         console.error("❌ Failed to save language preference:", err);
+            //     });
+            // }
+
         });
 
         document.querySelectorAll(".invite-btn").forEach(button => {
@@ -1148,25 +1203,47 @@
             document.getElementById("meetingModal").classList.add("hidden");
             document.getElementById("meetingRoomContainer").innerHTML = "";
         };
+        // function changeLanguage(lang) {
+        //     const currentUserId = sessionStorage.getItem("currentUserId");
+        //     const currentRoomName = sessionStorage.getItem("currentRoomName");
+        //     sessionStorage.setItem("targetLang", lang);
+
+        //     //console.log("🌍 Language selected:", lang);
+        //     //console.log("👤 User:", currentUserId, "📁 Room:", currentRoomName);
+
+        //     fetch("/set_language", {
+        //         method: "POST",
+        //         headers: { "Content-Type": "application/json" },
+        //         body: JSON.stringify({ userId: currentUserId, language: lang, room: currentRoomName })
+        //     }).then(() => {
+        //         console.log("🌍 Language preference saved:", lang);
+        //     }).catch((err) => {
+        //         console.error("❌ Failed to save language preference:", err);
+        //     });
+        // }
         function changeLanguage(lang) {
             const currentUserId = sessionStorage.getItem("currentUserId");
             const currentRoomName = sessionStorage.getItem("currentRoomName");
             sessionStorage.setItem("targetLang", lang);
-
-            console.log("🌍 Language selected:", lang);
             console.log("👤 User:", currentUserId, "📁 Room:", currentRoomName);
-
             fetch("/set_language", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ userId: currentUserId, language: lang, room: currentRoomName })
             }).then(() => {
                 console.log("🌍 Language preference saved:", lang);
+
+                // // 🔊 Emit WebSocket message to sync across browsers
+                // meetingSocket.send(JSON.stringify({
+                //     type: "language.change",
+                //     userId: currentUserId,
+                //     room: currentRoomName,
+                //     targetLanguage: lang
+                // }));
             }).catch((err) => {
                 console.error("❌ Failed to save language preference:", err);
             });
         }
-
     </script>
 </body>
 

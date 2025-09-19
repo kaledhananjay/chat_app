@@ -206,9 +206,30 @@ class MeetingConsumer(AsyncJsonWebsocketConsumer):
                         "userId": user_id
                     }
                 )
+            if msg_type == "language.change":
+                target_language = content.get("targetLanguage")
+                user_id = content.get("userId")
+                room = content.get("room")
+
+                # Optional: persist to Redis for late joiners
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        "type": "broadcast_language",
+                        "targetLanguage": target_language,
+                        "userId": user_id
+                    }
+                )
         except Exception as e:
             print("❌ Exception in receive_json:", str(e))
             await self.close(code=1011)
+    async def broadcast_language(self, event):
+        await self.send_json({
+            "type": "language.change",
+            "targetLanguage": event["targetLanguage"],
+            "userId": event["userId"]
+        })
+
 
     async def voice_answer(self, event):
         await self.send(text_data=json.dumps({
