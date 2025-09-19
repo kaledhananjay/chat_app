@@ -27,7 +27,7 @@ urlpatterns = [
     path("auth/", include("users.urls")),  # Include user authentication routes
     path('', include('chat.urls')),  # or whatever your app is called
     path('translate-audio/', translate_audio, name='translate_audio'),
-
+    path("", include("chat.urls")),  # or "users.urls" depending on where you put the view
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

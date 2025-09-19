@@ -266,6 +266,9 @@
             let cuserId = null;
             const username = document.getElementById("username").value;
             const roomName = document.getElementById("meeting-container").dataset.roomName;
+
+            sessionStorage.setItem("currentRoomName", roomName);
+
             const socket = new WebSocket(`ws://${window.location.host}/ws/meeting/${roomName}/`);
             const notificationSocket = new WebSocket(`ws://${window.location.host}/ws/notifications/`);
             const meetingSocket = new WebSocket(`ws://${window.location.host}/ws/meeting/{{ room_name }}/`);
@@ -274,6 +277,7 @@
             const pendingIncomingOffers = [];
             let localStream = null;
             const peers = {};
+            
             roomNameN = roomName
             let isMuted = false;
             const participants = new Set();

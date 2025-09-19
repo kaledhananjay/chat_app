@@ -282,6 +282,7 @@ def translate_audio(request):
 
 @csrf_exempt
 def set_language(request):
+    
     data = json.loads(request.body)
     user_id = data.get("userId")
     language = data.get("language")
@@ -698,11 +699,14 @@ async def send_translated_audio(self, sender_id, audio_url, translated_text, tar
 @csrf_exempt
 def set_language(request):
     data = json.loads(request.body)
-    user_id = data.get("userId")
+    user_id = int(data.get("userId"))
     lang = data.get("language")
     room = data.get("room")
-
     try:
+        if not MeetingInvite.objects.filter(target__id=user_id, room=room).exists():
+            print("Skipping language update for room creator or non-invitee.")
+            return JsonResponse({"status": "skipped"})
+        
         invite = MeetingInvite.objects.get(target__id=user_id, room=room)
         invite.preferred_lang = lang
         invite.save()
