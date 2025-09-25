@@ -8,7 +8,7 @@ import json
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
-from .models import CallSession, Chat, MeetingInvite, User
+from .models import CallSession, Chat, MeetingInvite, TranscriptSegment, User,perform_translation
 from .serializers import CallOfferSerializer, CallAnswerSerializer
 from rest_framework.permissions import IsAuthenticated
 from deep_translator import GoogleTranslator
@@ -26,6 +26,10 @@ from django.core.cache import cache
 import re
 from utils.redis_client import redis_client
 from utils.tts_cache import get_tts_cached
+from rest_framework.decorators import parser_classes
+from rest_framework.parsers import MultiPartParser
+import whisper
+import tempfile
 
 # Example usage
 redis_client.set("mykey", "myvalue")
@@ -151,6 +155,8 @@ def start_call(request):
 def get_offer(request):
     try:
         user_id = request.GET.get("for_user")
+        if not user_id:
+            return Response({"error": "Missing user ID"}, status=status.HTTP_400_BAD_REQUEST)
 
         call = CallSession.objects.filter(
             receiver_id=user_id,
@@ -159,16 +165,16 @@ def get_offer(request):
             is_active=True,
             notified=False,  
         ).last()
+        print(f"🔍 Matching calls for user {user_id}: {call}")
 
-        if call:
-            call.notified = True  
-            call.save()
-            return Response(CallOfferSerializer(call).data)
+        if call is None:
+            print(f"ℹ️ No pending call for user {user_id}")
+            return Response({"message": "No pending call"}, status=status.HTTP_204_NO_CONTENT)
 
-        return Response(
-            {"message": "No pending call"}, status=status.HTTP_204_NO_CONTENT
-        )
-
+        call.notified = True
+        call.save(update_fields=["notified"])
+        print(f"✅ Notifying call ID {call.id} for user {user_id}")
+        return Response(CallOfferSerializer(call).data)
     except Exception as e:
         print("Error in get_offer:", e)
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -221,59 +227,110 @@ def current_user_view(request):
 # Converts back target language text to target audio
 @csrf_exempt
 def translate_audio(request):
-    # user_id = request.POST.get("senderId")
-    # target_lang = cache.get(f"user_lang_{user_id}", "en")  # fallback to English
+    user_id = request.POST.get("userId")
+    #user_id = request.data.get("userId")
+    target_lang = cache.get(f"user_lang_{user_id}", "en")  # fallback to English
+    print("Language selected/saved:",target_lang, user_id)
     
     if request.method != "POST" or "audio" not in request.FILES:
         return JsonResponse({"error": "Invalid request"}, status=400)
 
     audio_file = request.FILES["audio"]
+    print(f"📥 Received blob size: {audio_file.size} bytes")
+    if audio_file.size < 64722:
+            print(f"⚠️ Skipping small blob: {audio_file.size} bytes")
+            return JsonResponse({
+                "translated": "",
+                "audio_url": "",
+                "error": "Blob too small to process"
+            }, status=200)
+            
     base_filename = str(uuid.uuid4())
     ogg_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.ogg")
+    webm_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.webm")
     wav_path = os.path.join(settings.MEDIA_ROOT, f"{base_filename}.wav")
 
-    with open(ogg_path, "wb") as f:
-        for chunk in audio_file.chunks():
-            f.write(chunk)
+    if audio_file.size > 3000:
+        with open(ogg_path, "wb") as f:
+            for chunk in audio_file.chunks():
+                f.write(chunk)
 
-    ffmpeg_cmd = [
-        "ffmpeg", "-y",
-        "-i", ogg_path,
-        "-acodec", "pcm_s16le",
-        "-ar", "16000",
-        "-ac", "1",
-        wav_path
-    ]
-
-    result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode != 0:
-       return JsonResponse(
-            {
+        ffmpeg_cmd = [
+            "ffmpeg", "-y",
+            "-i", ogg_path,
+            "-acodec", "pcm_s16le",
+            "-ar", "16000",
+            "-ac", "1",
+            wav_path
+        ]
+        print("🎧 FFmpeg conversion complete:", wav_path)
+        print(f"📦 WebM file ogg_path: {ogg_path} bytes")
+       
+        ogg_size = os.path.getsize(ogg_path)
+        print(f"📦 WebM file webm_size: {ogg_size} bytes")
+        if ogg_size < 64722:
+            print("🤫 WebM chunk too small, likely silent or clipped")
+            return JsonResponse({
+                "translated": "",
+                "audio_url": "",
+                "error": "WebM chunk too small"
+            }, status=200)
+    try:
+        result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0 or not os.path.exists(wav_path):
+            raise RuntimeError(result.stderr.decode())
+    except Exception as e:
+            print("❌ FFmpeg failed:", e)
+            return JsonResponse({
+                "translated": "",
+                "audio_url": "",
                 "error": "FFmpeg conversion failed",
-                "details": result.stderr.decode(),
-            },
-                status=500,
-       )
+                "details": str(e)
+            }, status=200)
+    if result.returncode != 0 or not os.path.exists(wav_path):
+        return JsonResponse({
+            "error": "FFmpeg conversion failed",
+            "details": result.stderr.decode(),
+        }, status=500)
+    #    return JsonResponse(
+    #         {
+    #             "error": "FFmpeg conversion failed",
+    #             "details": result.stderr.decode(),
+    #         },
+    #             status=500,
+    #    )
 
     recognizer = sr.Recognizer()
     try:
         with sr.AudioFile(wav_path) as source:
             audio = recognizer.record(source)
         text = recognizer.recognize_google(audio)
+        print("recognizer text:", text)
     except sr.UnknownValueError:
         return JsonResponse({"error": "Speech not understood"}, status=422)
     except sr.RequestError as e:
         return JsonResponse({"error": f"STT service issue: {e}"}, status=503)
 
     try:
-        translated = GoogleTranslator(source="auto", target="ja").translate(text)
+        translated = GoogleTranslator(source="auto", target=target_lang).translate(text)
+        print("🌐 Translated text:", translated)
+        if not translated.strip():
+            return JsonResponse({"error": "Translation empty", "translated": "", "audio_url": ""}, status=200)
     except Exception as e:
         return JsonResponse({"error": f"Translation failed: {e}"}, status=500)
-       
+    if not translated.strip():
+        print("⚠️ Empty translation, skipping TTS")
+        return JsonResponse({
+            "translated": "",
+            "audio_url": "",
+            "error": "Translation was empty"
+        }, status=200)
+               
     try:
         mp3_path = wav_path.replace(".wav", "_ja.mp3")
-        tts = gTTS(translated, lang="ja")
+        tts = gTTS(translated, lang=target_lang)
         tts.save(mp3_path)
+        print("translated mp3_path:", mp3_path)
     except Exception as e:
         return JsonResponse({"error": f"TTS failed: {e}"}, status=500)
 
@@ -282,16 +339,24 @@ def translate_audio(request):
 
 @csrf_exempt
 def set_language(request):
-    
-    data = json.loads(request.body)
-    user_id = data.get("userId")
-    language = data.get("language")
+    print("In set_language")
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid method"}, status=405)
+    try:
+        data = json.loads(request.body)
+        user_id = data.get("userId")
+        language = data.get("language")
+        print(f"Language set :{language} for user {user_id}")
+        
+        if not user_id or not language:
+            return JsonResponse({"error": "Missing userId or language"}, status=400)
 
-    if not user_id or not language:
-        return JsonResponse({"error": "Missing userId or language"}, status=400)
+        cache.set(f"user_lang_{user_id}", language, timeout=None)
+        return JsonResponse({"status": "ok"})
+    except Exception as e:
+        print("❌ Error in set_language:", e)
+        return JsonResponse({"error": "Server error"}, status=500)
 
-    cache.set(f"user_lang_{user_id}", language, timeout=None)
-    return JsonResponse({"status": "ok"})
 
 # Saves chat message in database with MesageText, Sender and Receiver
 @csrf_exempt
@@ -700,23 +765,37 @@ async def send_translated_audio(self, sender_id, audio_url, translated_text, tar
     
 @csrf_exempt
 def set_language(request):
-    data = json.loads(request.body)
-    user_id = int(data.get("userId"))
-    lang = data.get("language")
-    room = data.get("room")
-    try:
-        if not MeetingInvite.objects.filter(target__id=user_id, room=room).exists():
-            print("Skipping language update for room creator or non-invitee.")
-            return JsonResponse({"status": "skipped"})
-        
-        invite = MeetingInvite.objects.get(target__id=user_id, room=room)
-        invite.preferred_lang = lang
-        invite.save()
-        return JsonResponse({"status": "ok"})
-    except MeetingInvite.DoesNotExist:
-        return JsonResponse({"error": "Invite not found"}, status=404)
-    
+    print("In set_language")
 
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid method"}, status=405)
+
+    try:
+        raw_body = request.body.decode("utf-8")  # ✅ decode bytes to string
+        print("📥 Raw body:", raw_body)
+
+        data = json.loads(raw_body)  # ✅ now safe to parse
+        user_id = data.get("userId")
+        language = data.get("language")
+
+        print(f"🌍 Language set: {language} for user {user_id}")
+
+        if not user_id or not language or user_id == "null":
+            return JsonResponse({"error": "Missing or invalid userId or language"}, status=400)
+
+        cache.set(f"user_lang_{user_id}", language, timeout=None)
+        return JsonResponse({"status": "ok"})
+
+    except json.JSONDecodeError as e:
+        print("❌ JSON decode error:", e)
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    except Exception as e:
+        print("❌ General error in set_language:", e)
+        return JsonResponse({"error": "Server error"}, status=500)
+
+
+    
 def get_preferred_language(request):
     user_id = request.GET.get("userId")
     room = request.GET.get("room")
@@ -727,3 +806,57 @@ def get_preferred_language(request):
     except MeetingInvite.DoesNotExist:
         return JsonResponse({"error": "Invite not found"}, status=404)
 
+# @api_view(['POST'])
+# def save_transcript_segment(request):
+#     call_id = request.data.get("callId")
+#     speaker = request.data.get("speaker")
+#     text = request.data.get("text")
+
+#     call = CallSession.objects.get(id=call_id)
+#     target_lang = call.preferred_language or "en"
+
+#     translated = perform_translation(text, target_lang)
+
+#     TranscriptSegment.objects.create(
+#         call=call,
+#         speaker=speaker,
+#         original_text=text,
+#         translated_text=translated,
+#         language=target_lang
+#     )
+#     return Response({"message": "Segment saved", "translated": translated})
+
+# @api_view(['POST'])
+# @parser_classes([MultiPartParser])
+# def save_transcript_segment(request):
+#     call_id = request.data.get("callId")
+#     speaker = request.data.get("speaker")
+#     user_id = request.data.get("userId")
+#     audio_file = request.FILES.get("audio")
+
+#     call = CallSession.objects.get(id=call_id)
+#     target_lang = call.preferred_language or "en"
+
+#     original_text = transcribe_audio(audio_file)
+#     translated = perform_translation(original_text, target_lang)
+
+#     TranscriptSegment.objects.create(
+#         call=call,
+#         speaker=speaker,
+#         original_text=original_text,
+#         translated_text=translated,
+#         language=target_lang
+#     )
+
+#     return Response({"translated": translated})
+
+# def transcribe_audio(audio_file):
+#     model = whisper.load_model("base")  # or "small", "medium", "large"
+
+#     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
+#         for chunk in audio_file.chunks():
+#             temp_audio.write(chunk)
+#         temp_audio_path = temp_audio.name
+
+#     result = model.transcribe(temp_audio_path)
+#     return result["text"]

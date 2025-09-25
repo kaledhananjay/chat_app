@@ -38,4 +38,19 @@ class MeetingInvite(models.Model):
 
     def __str__(self):
         return f"{self.sender} invited {self.target} to {self.room}"
+    
+class TranscriptSegment(models.Model):
+    call = models.ForeignKey(CallSession, on_delete=models.CASCADE, related_name="transcripts")
+    speaker = models.CharField(max_length=50)  # e.g. "caller", "receiver"
+    original_text = models.TextField()
+    translated_text = models.TextField(blank=True, null=True)
+    language = models.CharField(max_length=10, default="en")
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.timestamp} [{self.speaker}]: {self.original_text[:30]}..."
+    
+class perform_translation(models.Model):
+    print("XXXX")
+
 

@@ -36,10 +36,47 @@
       background-color: #f8f9fa;
     }
 
+    .user-card button {
+      position: relative;
+      z-index: 10;
+    }
+
+    .user-card {
+      position: relative;
+    }
+
+    .call-button-wrapper {
+      z-index: 10;
+      position: relative;
+    }
+
+    .user-link {
+      display: inline-block;
+      margin-right: 10px;
+      z-index: 1;
+    }
+
     .user-card.selected {
       background-color: #e0f7fa;
       border-left: 4px solid #00bcd4;
     }
+
+    /* .user-card a {
+      background-color: rgba(255, 0, 0, 0.2);
+    }
+
+    .user-card button {
+      background-color: rgba(0, 255, 0, 0.2);
+      position: relative;
+      z-index: 10;
+    } */
+
+
+
+    /* .user-link {
+      display: inline-block;
+      margin-right: 10px;
+    } */
 
     #remoteAudio {
       display: none;
@@ -159,10 +196,14 @@
         </select>
         <button id="startCall" class="btn btn-outline-success me-2" style="display: none;">🎤 Start Voice Call</button>
         <button id="pollForCall" style="display: none;" class="btn btn-outline-success me-2">Check Incoming
-          Call</button><i class="bi bi-alarm"></i>
-       <button id="startMeetingBtn" class="btn btn-outline-primary me-2">📞 Start Group Call</button>
-        <button id="stopCall" class="btn btn-outline-secondary me-2">🛑 Stop Call</button>
-        <a href="{% url 'login' %}" class="btn btn-outline-danger">🚪 Logout</a>
+          Call</button>
+        <!-- <button id="startMeetingBtn" class="btn btn-outline-primary me-2">📞 Start Group Call</button> -->
+        <button id="startMeetingBtn" class="btn btn-outline-primary me-2" title="Start meeting"><i
+            class="bi bi-people-fill"></i></button>
+        <button id="stopCall" class="btn btn-outline-secondary me-2" title="Stop call"><i
+            class="bi bi-stop-circle-fill"></i></button>
+        <a href="{% url 'login' %}" class="btn btn-outline-danger" title="Logout"><i
+            class="bi bi-door-closed-fill"></i></a>
         <div class="modal fade" id="incomingCallModal" tabindex="-1" aria-labelledby="incomingCallLabel"
           aria-hidden="false">
           <div class="modal-dialog modal-dialog-bottom-end">
@@ -175,6 +216,7 @@
               </div>
               <div class="modal-footer">
                 <button type="button" class="btn btn-success" id="pickupBtn">Pick Up</button>
+                <button id="cancelCallBtn" class="btn btn-secondary">Cancel</button>
               </div>
             </div>
           </div>
@@ -191,11 +233,17 @@
             <h4>Connected Users</h4>
           </div>
           <div class="card-body">
+            <button onclick="console.log('📞 inline click fired')" class="btn btn-sm btn-light"> </button>
             <ul class="list-group">
               {% for user in users %}
-              <li class="list-group-item user-card" data-userid="{{ user.id }}">
-                <a href="{% url 'chat' user.id %}">{{ user.username }}</a>
-                <button class="btn btn-sm float-end btn-light" onclick="selectAndStartCall(this)">📞</button>
+              <li class="list-group-item user-card d-flex justify-content-between align-items-center"
+                data-userid="{{ user.id }}">
+                <div class="user-info">
+                  <a href="{% url 'chat' user.id %}" class="user-link">{{ user.username }}</a>
+                </div>
+                <div class="call-button-wrapper">
+                  <button class="btn btn-sm btn-light" onclick="selectAndStartCall(this)">📞</button>
+                </div>
               </li>
               {% empty %}
               <li class="list-group-item text-muted text-center">No users available.</li>
@@ -280,8 +328,13 @@
   <audio id="translatedAudio" controls></audio>
   <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      const startCall = document.getElementById("startCall");
+    window.onload = () => {
+      document.activeElement.blur();
+    };
+
+    document.addEventListener("DOMContentLoaded", () => { //
+      const startCallBtn = document.getElementById("startCall");
+      //console.log("startCallBtn:", startCallBtn);
       const pickupBtn = document.getElementById("pickupBtn");
       const ringtone = document.getElementById("ringtone");
       const modalElement = document.getElementById("incomingCallModal");
@@ -304,7 +357,18 @@
       let textToBeSent = null;
       let recorder = null;
       let receiver = "{{ receiver.id }}";
+      let isTranslationSessionActive = false;
+      let incomingCallShown = false;
 
+      document.getElementById("cancelCallBtn").onclick = () => {
+        console.log("🔔 Canceling call...");
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) modalInstance.hide();
+
+        incomingCallShown = false;
+        callInProgress = false;
+        lastOfferId = null;
+      };
 
       notificationSocket.onopen = () => {
         console.log("🔔 Notification WebSocket connected");
@@ -322,7 +386,9 @@
         }
       };
 
+      //This is invite popup for group call
       function showInviteModal(roomName, inviterId) {
+        //console.log("In showInviteModal incomingCallShown:", incomingCallShown)
         inviterId = roomName.inviterId;
         roomName = roomName.roomName
         const modal = document.getElementById("invite-modal");
@@ -360,6 +426,7 @@
 
       async function prepareMicTrack() {
         try {
+          console.log("In prepareMicTrack!");
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           const audioTracks = stream.getAudioTracks();
 
@@ -468,8 +535,9 @@
         return pc;
       }
 
-      startCall.onclick = async () => {
+      startCallBtn.onclick = async () => {
         try {
+          console.log("✅ 4 startCallBtn clicked");   //Step 4
           const callerId = await getCurrentUserId();
           if (!callerId) return alert("Unable to identify caller.");
 
@@ -487,12 +555,12 @@
           // Add tracks to connection and log them
           localStream.getAudioTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
-            console.log("📡 Caller sending track:", track.id, "| muted:", track.muted);
+            console.log("📡 5 Caller sending track:", track.id, "| muted:", track.muted); //Step 5
           });
 
           // Optional test stream for debugging
           const testStream = new MediaStream([localStream.getAudioTracks()[0]]);
-          console.log("🎤 Mic stream prepared:", testStream);
+          console.log("🎤 6 Mic stream prepared:", testStream);   //Step 6
 
           // Create and send SDP offer
           const offer = await peerConnection.createOffer();
@@ -513,15 +581,16 @@
 
           const data = await response.json();
           currentCallId = data.id;
-          console.log("📡 Outgoing call ID:", currentCallId);
+          console.log("📡 7 Outgoing call ID:", currentCallId); // Step 7
 
         } catch (err) {
           console.error("Error starting call:", err);
         }
       };
+      //console.log("Handler bound:", startCallBtn.onclick);
 
       setInterval(async () => {
-        if (callInProgress) return;
+        console.log("⏱️ Polling cycle triggered");
 
         try {
           const currentUserId = await getCurrentUserId();
@@ -529,30 +598,116 @@
           if (!currentUserId) return;
 
           const res = await fetch(`/api/call/offer?for_user=${currentUserId}`);
+          console.log("📨 Raw response:", await res.clone().text());
 
           if (res.status !== 200) return;
 
           const data = await res.json();
-
           if (!data?.sdp_offer || !data.id || data.sdp_offer === "test-offer") return;
-          if (data.id === lastOfferId) return;
 
-          lastOfferId = data.id;
-          currentCallId = data.id;
-          latestOffer = data.sdp_offer;
-          callInProgress = true;
+          // ✅ Guard against duplicate popup
+          if (data.id === lastOfferId && incomingCallShown) {
+            console.log("🔁 Duplicate offer suppressed:", data.id);
+            return;
+          }
+          try {
 
-          modalEl.show();
-          modalEl.setAttribute("aria-hidden", "false");
-          ringtone?.play().catch(() => { });
-          pickupBtn.focus();
+            console.log("📞 Showing popup...");
+            // ✅ Show popup
+            modalEl.show();
+            //modalElement.setAttribute("aria-hidden", "false");
+            ringtone?.play().catch(() => { });
+            pickupBtn.focus();
 
+            // ✅ Set flags AFTER showing popup
+            incomingCallShown = true;
+            lastOfferId = data.id;
+            currentCallId = data.id;
+            latestOffer = data.sdp_offer;
+            callInProgress = true;
+
+            // Auto-hide after 15 seconds
+            console.log("⏱️ Scheduling auto-hide...");
+            setTimeout(() => {
+              //const modalInstance = bootstrap.Modal.getInstance(modalEl);
+              console.log("⏱️ Attempting to auto-hide popup...");
+              modalEl.hide();
+
+              if (ringtone) {
+                ringtone.pause();
+                ringtone.currentTime = 0; // Optional: reset to start
+              }
+
+              incomingCallShown = false;
+              callInProgress = false;
+              lastOfferId = null;
+              console.log("⏱️ Popup auto-hidden after timeout");
+            }, 15000);
+          } catch (err) {
+            console.error("🔥 Error during popup logic:", err);
+          }
         } catch (err) {
           console.error("Polling error:", err);
         }
       }, 5000);
 
+      // // Bonus: Auto-hide after 5 seconds
+      // setTimeout(() => {
+      //   console.log("⏱️ Manual test: hiding modal");
+      //   modalEl.hide();
+      // }, 5000);
+
+
+      // setInterval(async () => {
+      //   console.log("⏱️ Polling cycle triggered");
+
+      //   if (callInProgress) return;
+
+      //   try {
+      //     const currentUserId = await getCurrentUserId();
+      //     sessionStorage.setItem("currentUserId", currentUserId);
+      //     if (!currentUserId) return;
+
+      //     const res = await fetch(`/api/call/offer?for_user=${currentUserId}`);
+      //     if (res.status !== 200) return;
+
+      //     const data = await res.json();
+      //     if (!data?.sdp_offer || !data.id || data.sdp_offer === "test-offer") return;
+      //     console.log("⏱️ 5. Polling cycle triggered", data);
+
+      //     //if (data.id === lastOfferId) return;
+      //     if (data.id === lastOfferId && incomingCallShown) {
+      //       console.log("🔁 Duplicate offer suppressed:", data.id);
+      //       return;
+      //     }
+
+      //     console.log("⏱️ 3. Polling cycle triggered", data);
+
+      //     //lastOfferId = data.id;
+      //     currentCallId = data.id;
+      //     latestOffer = data.sdp_offer;
+      //     callInProgress = true;
+
+      //     console.error("📞 Showing popup for call:", data.id);
+
+      //     if (incomingCallShown) return; // Prevent duplicate popup
+      //     console.log("⏱️ 4. Polling cycle triggered", callInProgress);
+
+      //     modalEl.show();
+      //     modalEl.setAttribute("aria-hidden", "false");
+      //     ringtone?.play().catch(() => { });
+      //     pickupBtn.focus();
+
+      //     incomingCallShown = true;
+      //     lastOfferId = data.id;
+
+      //   } catch (err) {
+      //     console.error("Polling error:", err);
+      //   }
+      // }, 5000);
+
       async function startRecording() {
+        console.log("9 In startRecording!!")  //Step 9
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const mimeType = [
           "audio/webm;codecs=opus",
@@ -565,50 +720,110 @@
           return;
         }
 
-        recorder = new MediaRecorder(stream, { mimeType });
-        recorder.ondataavailable = e => {
-          if (e.data.size > 0) chunks.push(e.data);
-        };
-        chunks = [];
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: mimeType });
+        return new Promise((resolve) => {
+          const recorder = new MediaRecorder(stream, { mimeType });
+          const chunks = [];
 
-          uploadAudio(blob);
-        };
-        recorder.start();
+          recorder.ondataavailable = e => {
+            if (e.data.size > 0) chunks.push(e.data);
+          };
+
+          recorder.onstop = async () => {
+            const blob = new Blob(chunks, { type: mimeType });
+            await uploadAudio(blob);
+            resolve(); // continue loop
+          };
+
+          recorder.start();
+          // Record for fixed duration (e.g. 5 seconds)
+          setTimeout(() => {
+            recorder.stop();
+          }, 5000);
+        });
       }
 
       pickupBtn.onclick = async () => {
         try {
+          // ✅ Hide popup first
+          if (modalEl) {
+            modalEl.hide();
+          } else {
+            modalElement.style.display = "none";
+          }
+
+          if (ringtone) {
+            ringtone.pause();
+            ringtone.currentTime = 0; // Optional: reset to start
+          }
+
+          incomingCallShown = false;
+          callInProgress = false;
+          lastOfferId = null;
+
+          console.log("✅ Call accepted, popup dismissed");
+
+          // ✅ Focus input
+          const inputEl = document.getElementById("messageInput");
+          if (inputEl) inputEl.focus();
+
+          // ✅ Start recording
+          console.log("🎙️ Starting recording...");
           await startRecording();
 
           setTimeout(() => {
             if (recorder && recorder.state === "recording") {
               recorder.stop();
-              console.log("Recording stopped.");
+              console.log("🛑 Recording stopped.");
             }
           }, 5000);
-          const popupEl = document.getElementById("incomingCallModal");
-          const modalInstance = bootstrap.Modal.getInstance(popupEl);
-          if (modalInstance) {
-            modalInstance.hide();
-          } else {
-            popupEl.style.display = "none";
-          }
-
-          const inputEl = document.getElementById("messageInput");
-          if (inputEl) inputEl.focus();
-
         } catch (err) {
           console.error("Pickup failed:", err);
         }
       };
 
+      // async function uploadAudio(blob) {
+      //   const callId = sessionStorage.getItem("currentCallId");
+      //   const userId = sessionStorage.getItem("currentUserId");
+      //   const speaker = "receiver"; // or "caller", depending on context
+
+      //   if (!callId || !userId || !blob) return;
+
+      //   const formData = new FormData();
+      //   formData.append("audio", blob);
+      //   formData.append("callId", callId);
+      //   formData.append("userId", userId);
+      //   formData.append("speaker", speaker);
+
+      //   try {
+      //     const res = await fetch("/api/save_transcript_segment", {
+      //       method: "POST",
+      //       body: formData
+      //     });
+
+      //     const data = await res.json();
+      //     console.log("📝 Transcript saved:", data.translated);
+
+      //     // Optional: show live transcript
+      //     showTranscriptSegment(speaker, data.translated);
+      //   } catch (err) {
+      //     console.error("❌ Failed to save transcript:", err);
+      //   }
+      // }
+
+      // function showTranscriptSegment(speaker, translatedText) {
+      //   const transcriptBox = document.getElementById("transcriptBox");
+      //   const line = document.createElement("div");
+      //   line.textContent = `[${speaker}]: ${translatedText}`;
+      //   transcriptBox.appendChild(line);
+      // }
+
       function uploadAudio(blob) {
 
-        //console.log("In uploadAudio...");
+        console.log("10 In uploadAudio...");     // Step 10
         const formData = new FormData();
         formData.append("audio", blob, "speech.ogg");
+        formData.append("userId", sessionStorage.getItem("currentUserId"));
+
         //console.log(" Uploading Audio...");
         fetch("/translate-audio/", {
           method: "POST",
@@ -629,6 +844,7 @@
       }
 
       function saveMessageAJAX() {
+        console.log("11 Sending Translated meddage:", textToBeSent);  // Step 11
         const message = textToBeSent.trim();
         const receiverId = "{{ receiver.id }}";
 
@@ -702,6 +918,16 @@
 
       function stopCall() {
         console.log("Stopping call...");
+        // Stop translation loop
+        isTranslationSessionActive = false;
+
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalInstance) modalInstance.hide();
+
+        callInProgress = false;
+        incomingCallShown = false;
+        lastOfferId = null;
+
 
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop());
@@ -728,6 +954,34 @@
         const remoteAudio = document.getElementById("remoteAudio");
         if (remoteAudio) remoteAudio.srcObject = null;
       }
+
+      window.selectAndStartCall = function (button) {
+        console.log("📞 1 Button clicked:", button);  // Step 1
+        selectUser(button);
+
+        const startCallBtn = document.getElementById("startCall");
+        if (startCallBtn) {
+          console.log("📞 3 Triggering startCallBtn.click()");  //Step 3
+          startCallBtn.click();
+        } else {
+          console.warn("Start Call button not found in DOM");
+        }
+      };
+
+      function selectUser(button) {
+        console.warn("2 In function selectUser(button)...");  //Step 2
+        document.querySelectorAll('.user-card').forEach(card =>
+          card.classList.remove('selected')
+        );
+
+        const card = button.closest('.user-card');
+        if (card) {
+          card.classList.add('selected');
+        } else {
+          console.warn("Could not find user-card for clicked button");
+        }
+      }
+
     });
 
   </script>
@@ -745,16 +999,19 @@
       }
     }
 
-    function selectAndStartCall(button) {
-      selectUser(button);
-
-      const startCallBtn = document.getElementById("startCall");
-      if (startCallBtn) {
-        startCallBtn.click();
-      } else {
-        console.warn("Start Call button not found in DOM");
-      }
-    }
+    // function selectAndStartCall(button) {
+    //   console.warn("In selectAndStartCall");
+    //   selectUser(button);
+    //   console.warn("After selectUser(button)");
+    //   //const startCallBtn = document.getElementById("startCall");
+    //   if (startCallBtn) {
+    //     console.warn("Before startCallBtn.click()");
+    //     startCallBtn.click();
+    //     console.warn("After startCallBtn.click()");
+    //   } else {
+    //     console.warn("Start Call button not found in DOM");
+    //   }
+    // }
 
     document.getElementById("startMeetingBtn").addEventListener("click", () => {
       //startGroupCall(); // This is fine because it's not using await here
@@ -774,7 +1031,9 @@
       sessionStorage.setItem("targetLang", lang);
 
       const currentUserId = sessionStorage.getItem("currentUserId");
+      console.log("📦 Raw userId from sessionStorage:", sessionStorage.getItem("currentUserId"));
       console.log("🌍 Language preference saved:", lang, currentUserId);
+      if(!sessionStorage.getItem("currentUserId")) return
       fetch("/set_language", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
