@@ -8,7 +8,7 @@ import json
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
-from .models import CallSession, Chat, MeetingInvite, TranscriptSegment, User,perform_translation
+from .models import CallSession, Chat, MeetingInvite, User,perform_translation
 from .serializers import CallOfferSerializer, CallAnswerSerializer
 from rest_framework.permissions import IsAuthenticated
 from deep_translator import GoogleTranslator
@@ -806,57 +806,3 @@ def get_preferred_language(request):
     except MeetingInvite.DoesNotExist:
         return JsonResponse({"error": "Invite not found"}, status=404)
 
-# @api_view(['POST'])
-# def save_transcript_segment(request):
-#     call_id = request.data.get("callId")
-#     speaker = request.data.get("speaker")
-#     text = request.data.get("text")
-
-#     call = CallSession.objects.get(id=call_id)
-#     target_lang = call.preferred_language or "en"
-
-#     translated = perform_translation(text, target_lang)
-
-#     TranscriptSegment.objects.create(
-#         call=call,
-#         speaker=speaker,
-#         original_text=text,
-#         translated_text=translated,
-#         language=target_lang
-#     )
-#     return Response({"message": "Segment saved", "translated": translated})
-
-# @api_view(['POST'])
-# @parser_classes([MultiPartParser])
-# def save_transcript_segment(request):
-#     call_id = request.data.get("callId")
-#     speaker = request.data.get("speaker")
-#     user_id = request.data.get("userId")
-#     audio_file = request.FILES.get("audio")
-
-#     call = CallSession.objects.get(id=call_id)
-#     target_lang = call.preferred_language or "en"
-
-#     original_text = transcribe_audio(audio_file)
-#     translated = perform_translation(original_text, target_lang)
-
-#     TranscriptSegment.objects.create(
-#         call=call,
-#         speaker=speaker,
-#         original_text=original_text,
-#         translated_text=translated,
-#         language=target_lang
-#     )
-
-#     return Response({"translated": translated})
-
-# def transcribe_audio(audio_file):
-#     model = whisper.load_model("base")  # or "small", "medium", "large"
-
-#     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
-#         for chunk in audio_file.chunks():
-#             temp_audio.write(chunk)
-#         temp_audio_path = temp_audio.name
-
-#     result = model.transcribe(temp_audio_path)
-#     return result["text"]

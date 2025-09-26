@@ -1,13 +1,13 @@
 from pkgutil import get_data
+import tempfile
 from channels.generic.websocket import AsyncWebsocketConsumer
 import json
 from django.core.cache import cache
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
-#import traceback
 from .models import MeetingInvite
-#from redis_utils import add_participant
-#from channels.db import database_sync_to_async
-#from django.db.models import Q
+import speech_recognition as sr
+import os
+from deep_translator import GoogleTranslator
 
 # Global in-memory store for participants per room
 ROOM_PARTICIPANTS = {}

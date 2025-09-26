@@ -56,17 +56,11 @@ ASGI_APPLICATION = "chat_app.asgi.application"
 
 CHANNEL_LAYERS = {
     "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+        "CONFIG": { #Added for one to one call Websocket 250925
+        }
     }
 }
-
-# # ✅ Use Redis for better WebSocket handling (Install Redis with `pip install channels-redis`)
-# CHANNEL_LAYERS = {
-#             "default": {
-#         "BACKEND": "channels.layers.InMemoryChannelLayer",  # ✅ Use Redis for production
-#         }
-#     },
-
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

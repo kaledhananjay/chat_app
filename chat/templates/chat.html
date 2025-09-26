@@ -61,23 +61,6 @@
       border-left: 4px solid #00bcd4;
     }
 
-    /* .user-card a {
-      background-color: rgba(255, 0, 0, 0.2);
-    }
-
-    .user-card button {
-      background-color: rgba(0, 255, 0, 0.2);
-      position: relative;
-      z-index: 10;
-    } */
-
-
-
-    /* .user-link {
-      display: inline-block;
-      margin-right: 10px;
-    } */
-
     #remoteAudio {
       display: none;
     }
@@ -197,7 +180,6 @@
         <button id="startCall" class="btn btn-outline-success me-2" style="display: none;">🎤 Start Voice Call</button>
         <button id="pollForCall" style="display: none;" class="btn btn-outline-success me-2">Check Incoming
           Call</button>
-        <!-- <button id="startMeetingBtn" class="btn btn-outline-primary me-2">📞 Start Group Call</button> -->
         <button id="startMeetingBtn" class="btn btn-outline-primary me-2" title="Start meeting"><i
             class="bi bi-people-fill"></i></button>
         <button id="stopCall" class="btn btn-outline-secondary me-2" title="Stop call"><i
@@ -275,7 +257,6 @@
           </div>
         </div>
       </div>
-      <!-- <div id="inviteBox" class="mt-3"></div> -->
     </div>
   </div>
   <div id="invite-modal" class="modal hidden">
@@ -291,7 +272,6 @@
   <script>
     function loadChatHistory() {
       const receiver = "{{ receiver.id }}";
-      //console.log('After Call : ', receiver)
       fetch(`/chat/load/?receiver=${receiver}`, { cache: "no-store" })
         .then(response => response.json())
         .then(data => {
@@ -334,7 +314,6 @@
 
     document.addEventListener("DOMContentLoaded", () => { //
       const startCallBtn = document.getElementById("startCall");
-      //console.log("startCallBtn:", startCallBtn);
       const pickupBtn = document.getElementById("pickupBtn");
       const ringtone = document.getElementById("ringtone");
       const modalElement = document.getElementById("incomingCallModal");
@@ -388,7 +367,6 @@
 
       //This is invite popup for group call
       function showInviteModal(roomName, inviterId) {
-        //console.log("In showInviteModal incomingCallShown:", incomingCallShown)
         inviterId = roomName.inviterId;
         roomName = roomName.roomName
         const modal = document.getElementById("invite-modal");
@@ -587,18 +565,15 @@
           console.error("Error starting call:", err);
         }
       };
-      //console.log("Handler bound:", startCallBtn.onclick);
 
       setInterval(async () => {
-        console.log("⏱️ Polling cycle triggered");
-
         try {
           const currentUserId = await getCurrentUserId();
           sessionStorage.setItem("currentUserId", currentUserId);
           if (!currentUserId) return;
 
           const res = await fetch(`/api/call/offer?for_user=${currentUserId}`);
-          console.log("📨 Raw response:", await res.clone().text());
+          //console.log("📨 Raw response:", await res.clone().text());
 
           if (res.status !== 200) return;
 
@@ -615,7 +590,6 @@
             console.log("📞 Showing popup...");
             // ✅ Show popup
             modalEl.show();
-            //modalElement.setAttribute("aria-hidden", "false");
             ringtone?.play().catch(() => { });
             pickupBtn.focus();
 
@@ -629,7 +603,6 @@
             // Auto-hide after 15 seconds
             console.log("⏱️ Scheduling auto-hide...");
             setTimeout(() => {
-              //const modalInstance = bootstrap.Modal.getInstance(modalEl);
               console.log("⏱️ Attempting to auto-hide popup...");
               modalEl.hide();
 
@@ -650,61 +623,6 @@
           console.error("Polling error:", err);
         }
       }, 5000);
-
-      // // Bonus: Auto-hide after 5 seconds
-      // setTimeout(() => {
-      //   console.log("⏱️ Manual test: hiding modal");
-      //   modalEl.hide();
-      // }, 5000);
-
-
-      // setInterval(async () => {
-      //   console.log("⏱️ Polling cycle triggered");
-
-      //   if (callInProgress) return;
-
-      //   try {
-      //     const currentUserId = await getCurrentUserId();
-      //     sessionStorage.setItem("currentUserId", currentUserId);
-      //     if (!currentUserId) return;
-
-      //     const res = await fetch(`/api/call/offer?for_user=${currentUserId}`);
-      //     if (res.status !== 200) return;
-
-      //     const data = await res.json();
-      //     if (!data?.sdp_offer || !data.id || data.sdp_offer === "test-offer") return;
-      //     console.log("⏱️ 5. Polling cycle triggered", data);
-
-      //     //if (data.id === lastOfferId) return;
-      //     if (data.id === lastOfferId && incomingCallShown) {
-      //       console.log("🔁 Duplicate offer suppressed:", data.id);
-      //       return;
-      //     }
-
-      //     console.log("⏱️ 3. Polling cycle triggered", data);
-
-      //     //lastOfferId = data.id;
-      //     currentCallId = data.id;
-      //     latestOffer = data.sdp_offer;
-      //     callInProgress = true;
-
-      //     console.error("📞 Showing popup for call:", data.id);
-
-      //     if (incomingCallShown) return; // Prevent duplicate popup
-      //     console.log("⏱️ 4. Polling cycle triggered", callInProgress);
-
-      //     modalEl.show();
-      //     modalEl.setAttribute("aria-hidden", "false");
-      //     ringtone?.play().catch(() => { });
-      //     pickupBtn.focus();
-
-      //     incomingCallShown = true;
-      //     lastOfferId = data.id;
-
-      //   } catch (err) {
-      //     console.error("Polling error:", err);
-      //   }
-      // }, 5000);
 
       async function startRecording() {
         console.log("9 In startRecording!!")  //Step 9
@@ -781,42 +699,6 @@
         }
       };
 
-      // async function uploadAudio(blob) {
-      //   const callId = sessionStorage.getItem("currentCallId");
-      //   const userId = sessionStorage.getItem("currentUserId");
-      //   const speaker = "receiver"; // or "caller", depending on context
-
-      //   if (!callId || !userId || !blob) return;
-
-      //   const formData = new FormData();
-      //   formData.append("audio", blob);
-      //   formData.append("callId", callId);
-      //   formData.append("userId", userId);
-      //   formData.append("speaker", speaker);
-
-      //   try {
-      //     const res = await fetch("/api/save_transcript_segment", {
-      //       method: "POST",
-      //       body: formData
-      //     });
-
-      //     const data = await res.json();
-      //     console.log("📝 Transcript saved:", data.translated);
-
-      //     // Optional: show live transcript
-      //     showTranscriptSegment(speaker, data.translated);
-      //   } catch (err) {
-      //     console.error("❌ Failed to save transcript:", err);
-      //   }
-      // }
-
-      // function showTranscriptSegment(speaker, translatedText) {
-      //   const transcriptBox = document.getElementById("transcriptBox");
-      //   const line = document.createElement("div");
-      //   line.textContent = `[${speaker}]: ${translatedText}`;
-      //   transcriptBox.appendChild(line);
-      // }
-
       function uploadAudio(blob) {
 
         console.log("10 In uploadAudio...");     // Step 10
@@ -824,7 +706,6 @@
         formData.append("audio", blob, "speech.ogg");
         formData.append("userId", sessionStorage.getItem("currentUserId"));
 
-        //console.log(" Uploading Audio...");
         fetch("/translate-audio/", {
           method: "POST",
           body: formData
@@ -879,9 +760,7 @@
       });
 
       function sendTranlatedtextToUser() {
-        //console.log("Translated XXX:", textToBeSent);
         let userId = "{{ receiver.id }}"
-        //const messageInput = document.getElementById("message");
         const message = textToBeSent.trim();
         console.log("userId :", userId);
         if (message !== "") {
@@ -999,22 +878,7 @@
       }
     }
 
-    // function selectAndStartCall(button) {
-    //   console.warn("In selectAndStartCall");
-    //   selectUser(button);
-    //   console.warn("After selectUser(button)");
-    //   //const startCallBtn = document.getElementById("startCall");
-    //   if (startCallBtn) {
-    //     console.warn("Before startCallBtn.click()");
-    //     startCallBtn.click();
-    //     console.warn("After startCallBtn.click()");
-    //   } else {
-    //     console.warn("Start Call button not found in DOM");
-    //   }
-    // }
-
     document.getElementById("startMeetingBtn").addEventListener("click", () => {
-      //startGroupCall(); // This is fine because it's not using await here
       const roomName = `room_${Date.now()}`;
       const receiverId = "{{ receiver.id }}";
       const vtag = "chat"
@@ -1033,7 +897,7 @@
       const currentUserId = sessionStorage.getItem("currentUserId");
       console.log("📦 Raw userId from sessionStorage:", sessionStorage.getItem("currentUserId"));
       console.log("🌍 Language preference saved:", lang, currentUserId);
-      if(!sessionStorage.getItem("currentUserId")) return
+      if (!sessionStorage.getItem("currentUserId")) return
       fetch("/set_language", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
