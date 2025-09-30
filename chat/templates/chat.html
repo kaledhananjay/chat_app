@@ -323,6 +323,7 @@
       const modalInvite = document.getElementById("invite-modal");
       const acceptBtn = document.getElementById("accept-invite-btn");
       const declineBtn = document.getElementById("decline-invite-btn");
+      //socket = new WebSocket(`ws://${window.location.host}/ws/translate/${callerId}/`);
 
       let localStream = null;
       let latestOffer = null;
@@ -586,7 +587,6 @@
             return;
           }
           try {
-
             console.log("📞 Showing popup...");
             // ✅ Show popup
             modalEl.show();
@@ -687,6 +687,7 @@
           // ✅ Start recording
           console.log("🎙️ Starting recording...");
           await startRecording();
+          setInterval(() => startRecording(), 5000);
 
           setTimeout(() => {
             if (recorder && recorder.state === "recording") {
@@ -697,6 +698,7 @@
         } catch (err) {
           console.error("Pickup failed:", err);
         }
+
       };
 
       function uploadAudio(blob) {
@@ -795,9 +797,9 @@
         }
       }, { once: true }); // Runs only once to avoid re-adding audio
 
+
       function stopCall() {
-        console.log("Stopping call...");
-        // Stop translation loop
+        console.log("Stopping call..."); // Stop translation loop 
         isTranslationSessionActive = false;
 
         const modalInstance = bootstrap.Modal.getInstance(modalEl);
@@ -806,7 +808,6 @@
         callInProgress = false;
         incomingCallShown = false;
         lastOfferId = null;
-
 
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop());
@@ -832,40 +833,30 @@
 
         const remoteAudio = document.getElementById("remoteAudio");
         if (remoteAudio) remoteAudio.srcObject = null;
-      }
 
-      window.selectAndStartCall = function (button) {
-        console.log("📞 1 Button clicked:", button);  // Step 1
-        selectUser(button);
-
-        const startCallBtn = document.getElementById("startCall");
-        if (startCallBtn) {
-          console.log("📞 3 Triggering startCallBtn.click()");  //Step 3
-          startCallBtn.click();
-        } else {
-          console.warn("Start Call button not found in DOM");
-        }
-      };
-
-      function selectUser(button) {
-        console.warn("2 In function selectUser(button)...");  //Step 2
-        document.querySelectorAll('.user-card').forEach(card =>
-          card.classList.remove('selected')
-        );
-
-        const card = button.closest('.user-card');
-        if (card) {
-          card.classList.add('selected');
-        } else {
-          console.warn("Could not find user-card for clicked button");
-        }
       }
 
     });
 
+    window.selectAndStartCall = function (button) {
+      console.log("📞 1 Button clicked:", button);  // Step 1
+      selectUser(button);
+
+      const startCallBtn = document.getElementById("startCall");
+      if (startCallBtn) {
+        console.log("📞 3 Triggering startCallBtn.click()");  //Step 3
+
+        startCallBtn.click();
+        //setInterval(() => startCallBtn.click(), 5000); // ✅ Correct
+
+      } else {
+        console.warn("Start Call button not found in DOM");
+      }
+    };
   </script>
   <script>
     function selectUser(button) {
+      console.warn("2 In function selectUser(button)...");  //Step 2
       document.querySelectorAll('.user-card').forEach(card =>
         card.classList.remove('selected')
       );
