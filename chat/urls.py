@@ -4,7 +4,7 @@ from .views import (
     current_user_view, save_message_view,
     meeting_room_group, meeting_room_direct,
     start_call, get_offer, send_answer, get_answer,
-    test_post, translate_audio,send_meeting_invite,embedded_meeting_view,
+    test_post, send_meeting_invite,embedded_meeting_view,
     get_pending_invites, respond_to_invite,get_meeting_invite_by_room,create_meeting_room,
     translate_audio_realtime,set_language,get_preferred_language
 )
@@ -20,7 +20,7 @@ urlpatterns = [
 
     # User & Audio APIs
     path('api/me', current_user_view),
-    path('translate-audio/', translate_audio, name='translate_audio'),
+    #path('translate-audio/', translate_audio, name='translate_audio'),
     path("translate-audio-realtime/", translate_audio_realtime, name="translate_audio_realtime"),
     path("set_language", set_language, name="set_language"),
     path("get_preferred_language/", get_preferred_language, name="get_preferred_language"),

@@ -20,7 +20,7 @@ from django.urls import path, include
 from chat.views import chat_page
 from django.conf import settings
 from django.conf.urls.static import static
-from chat.views import translate_audio
+#from chat.views import translate_audio
 from chat_app.settings import BASE_DIR  
 
 urlpatterns = [
@@ -28,7 +28,7 @@ urlpatterns = [
     path("chat/", include("chat.urls")),
     path("auth/", include("users.urls")),  # Include user authentication routes
     path('', include('chat.urls')),  # or whatever your app is called
-    path('translate-audio/', translate_audio, name='translate_audio'),
+    #path('translate-audio/', translate_audio, name='translate_audio'),
     path("", include("chat.urls")),  # or "users.urls" depending on where you put the view
 ]
 

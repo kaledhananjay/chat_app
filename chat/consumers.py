@@ -4,6 +4,8 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 import json
 from django.core.cache import cache
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
+
+from chat.views import translate_audio_from_bytes
 from .models import MeetingInvite
 import speech_recognition as sr
 import os
@@ -304,4 +306,35 @@ def remove_participant(room_name, user_id):
     participants = get_participants(room_name)
     participants = [p for p in participants if p["id"] != user_id]
     set_participants(room_name, participants)
+
+class TranslateConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        try:
+            print(f"🔌 WebSocket connect attempt for user {self.scope['url_route']['kwargs']['user_id']}")
+            self.user_id = self.scope['url_route']['kwargs']['user_id']
+            await self.accept()
+            print(f"🔌 WebSocket connected for user {self.user_id}")
+        except Exception as e:
+            print(f"❌ Error during connect: {e}")
+
+        
+    async def disconnect(self, close_code):
+         print(f"🔌 Disconnect triggered for user {self.scope['url_route']['kwargs']['user_id']} with code {close_code}")
+
+
+    async def receive(self, text_data=None, bytes_data=None):
+        data = json.loads(text_data)
+        if data.get("sender") == "caller":
+            # Decode base64 if needed, process, and forward to callee
+            await self.channel_layer.send("callee_channel", {
+                "type": "audio.forward",
+                "chunk": data["payload"],
+                "chunk_id": data["chunk_id"],
+                "sender": "server",
+                "target": "callee",
+                "mimeType": data["mimeType"]
+            })
+
+
+
     

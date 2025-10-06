@@ -313,13 +313,17 @@
     };
 
     document.addEventListener("DOMContentLoaded", () => { //
+      const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+      const rsScheme = window.location.protocol === "https:" ? "https" : "http";
+
       const startCallBtn = document.getElementById("startCall");
       const pickupBtn = document.getElementById("pickupBtn");
       const ringtone = document.getElementById("ringtone");
       const modalElement = document.getElementById("incomingCallModal");
       const modalEl = new bootstrap.Modal(modalElement);
       document.getElementById("stopCall").addEventListener("click", stopCall);
-      const notificationSocket = new WebSocket(`ws://${window.location.host}/ws/notifications/`);
+      //const notificationSocket = new WebSocket(`${wsScheme}://${window.location.host}/ws/notifications/`);
+      const notificationSocket = new WebSocket(`${wsScheme}://${window.location.host}/ws/notifications/`);
       const modalInvite = document.getElementById("invite-modal");
       const acceptBtn = document.getElementById("accept-invite-btn");
       const declineBtn = document.getElementById("decline-invite-btn");
@@ -339,6 +343,95 @@
       let receiver = "{{ receiver.id }}";
       let isTranslationSessionActive = false;
       let incomingCallShown = false;
+      const callerId = "{{ receiver.id }}";
+      const calleeId = "{{ request.user.id }}";
+
+      console.log("wsScheme:", wsScheme);
+      let callerSocket, calleeSocket;
+
+      function openTranslationSockets(callerId, calleeId) {
+        console.log("callerId = ", callerId);
+        console.log("calleeId = ", calleeId);
+
+        callerSocket = new WebSocket(`${wsScheme}://${window.location.host}/ws/translate/${callerId}/`);
+        calleeSocket = new WebSocket(`${wsScheme}://${window.location.host}/ws/translate/${calleeId}/`);
+        console.log(`wsScheme:`, wsScheme)
+        if (callerSocket.readyState === WebSocket.OPEN) {
+          console.log("✅ WebSocket is open");
+        } else if (callerSocket.readyState === WebSocket.CONNECTING) {
+          console.log("⏳ WebSocket is still connecting");
+        } else if (callerSocket.readyState === WebSocket.CLOSING) {
+          console.log("⚠️ WebSocket is closing");
+        } else if (callerSocket.readyState === WebSocket.CLOSED) {
+          console.log("❌ WebSocket is closed");
+        }
+
+        calleeSocket.onopen = () => {
+          console.log("✅ WebSocket opened");
+        };
+
+        calleeSocket.onerror = err => {
+          console.error("❌ WebSocket error", err);
+        };
+
+        calleeSocket.onclose = () => {
+          console.log("🔌 WebSocket closed", event);
+        };
+
+
+
+        calleeSocket.onmessage = e => {
+          const data = JSON.parse(e.data);
+
+          if (data.sender === "server" && data.target === "callee") {
+            const audioBlob = base64ToBlob(data.chunk, data.mimeType);
+            playAudioBlob(audioBlob);
+          }
+          // const audio = new Audio(data.audio_url);
+          // if (!data.audio_url) return;
+          // //console.log("🎧 Data WS Received:", data);
+          // console.log("🎧 Callee Received audio URL:", data.audio_url);
+          // audio.play(); // 🔊 Callee hears caller
+        };
+
+        function base64ToBlob(base64, mimeType) {
+          const byteChars = atob(base64);
+          const byteNumbers = new Array(byteChars.length).fill().map((_, i) => byteChars.charCodeAt(i));
+          const byteArray = new Uint8Array(byteNumbers);
+          return new Blob([byteArray], { type: mimeType });
+        }
+
+        function playAudioBlob(blob) {
+          const audioUrl = URL.createObjectURL(blob);
+          const audio = new Audio(audioUrl);
+          audio.play();
+
+          // Optional: clean up after playback
+          audio.onended = () => {
+            URL.revokeObjectURL(audioUrl);
+          };
+        }
+
+
+        callerSocket.onopen = () => {
+          console.log("✅ WebSocket opened");
+        };
+
+        callerSocket.onerror = err => {
+          console.error("❌ WebSocket error", err);
+        };
+
+        callerSocket.onclose = () => {
+          console.log("🔌 WebSocket closed", event);
+        };
+
+        callerSocket.onmessage = e => {
+          const data = JSON.parse(e.data);
+          const audio = new Audio(data.audio_url);
+          console.log("🎧 Caller Received audio URL:", data.audio_url);
+          audio.play(); // 🔊 Caller hears callee
+        };
+      }
 
       document.getElementById("cancelCallBtn").onclick = () => {
         console.log("🔔 Canceling call...");
@@ -624,41 +717,115 @@
         }
       }, 5000);
 
-      async function startRecording() {
-        console.log("9 In startRecording!!")  //Step 9
+      //Added for both way communication
+      async function startCallerStreaming() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mimeType = [
-          "audio/webm;codecs=opus",
-          "audio/webm",         // fallback
-          "audio/ogg;codecs=opus"
-        ].find(type => MediaRecorder.isTypeSupported(type));
+        const mimeType = getSupportedMimeType();
+        const recorder = new MediaRecorder(stream, { mimeType });
 
-        if (!mimeType) {
-          alert("No supported audio format found for MediaRecorder");
-          return;
-        }
+        recorder.ondataavailable = e => {
+          if (e.data.size > 0 && callerSocket.readyState === WebSocket.OPEN) {
+            (async () => {
+              const base64Audio = await blobToBase64(e.data);
 
-        return new Promise((resolve) => {
-          const recorder = new MediaRecorder(stream, { mimeType });
-          const chunks = [];
+              const message = {
+                type: "audio_chunk",
+                sender: "caller",
+                chunk_id: generateChunkId(),
+                payload: base64Audio,
+                mimeType: mimeType,
+                timestamp: Date.now()
+              };
+              callerSocket.send(e.data);
+            })();
+          }
+        };
+        recorder.start(5000); // ⏱️ chunk every 1.5s
+      }
 
-          recorder.ondataavailable = e => {
-            if (e.data.size > 0) chunks.push(e.data);
-          };
-
-          recorder.onstop = async () => {
-            const blob = new Blob(chunks, { type: mimeType });
-            await uploadAudio(blob);
-            resolve(); // continue loop
-          };
-
-          recorder.start();
-          // Record for fixed duration (e.g. 5 seconds)
-          setTimeout(() => {
-            recorder.stop();
-          }, 5000);
+      function blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
         });
       }
+      //Added for both way communication
+
+      //Added for both way communication
+      async function startCalleeStreaming() {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = getSupportedMimeType();
+        const recorder = new MediaRecorder(stream, { mimeType });
+
+        recorder.ondataavailable = e => {
+          if (e.data.size > 0 && calleeSocket.readyState === WebSocket.OPEN) {
+            (async () => {
+              const base64Audio = await blobToBase64(e.data);
+
+              const message = {
+                type: "audio_chunk",
+                sender: "callee",  // 👈 identifies origin
+                chunk_id: generateChunkId(),
+                payload: base64Audio,
+                mimeType: mimeType,
+                timestamp: Date.now()
+              };
+              calleeSocket.send(e.data);
+            })();
+          }
+        };
+
+        recorder.start(1500);
+      }
+      //Added for both way communication
+
+      //Added for both way communication
+      function getSupportedMimeType() {
+        return ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]
+          .find(type => MediaRecorder.isTypeSupported(type));
+      }
+      //Added for both way communication
+
+
+      //Commented for both way communication**************
+      // async function startRecording() {
+      //   console.log("9 In startRecording!!")  //Step 9
+      //   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      //   const mimeType = [
+      //     "audio/webm;codecs=opus",
+      //     "audio/webm",         // fallback
+      //     "audio/ogg;codecs=opus"
+      //   ].find(type => MediaRecorder.isTypeSupported(type));
+
+      //   if (!mimeType) {
+      //     alert("No supported audio format found for MediaRecorder");
+      //     return;
+      //   }
+
+      //   return new Promise((resolve) => {
+      //     const recorder = new MediaRecorder(stream, { mimeType });
+      //     const chunks = [];
+
+      //     recorder.ondataavailable = e => {
+      //       if (e.data.size > 0) chunks.push(e.data);
+      //     };
+
+      //     recorder.onstop = async () => {
+      //       const blob = new Blob(chunks, { type: mimeType });
+      //       await uploadAudio(blob);
+      //       resolve(); // continue loop
+      //     };
+
+      //     recorder.start();
+      //     // Record for fixed duration (e.g. 5 seconds)
+      //     setTimeout(() => {
+      //       recorder.stop();
+      //     }, 5000);
+      //   });
+      // }
+      //Commented for both way communication**************
 
       pickupBtn.onclick = async () => {
         try {
@@ -686,8 +853,17 @@
 
           // ✅ Start recording
           console.log("🎙️ Starting recording...");
-          await startRecording();
-          setInterval(() => startRecording(), 5000);
+          // ✅ Open WebSocket connections for both directions
+          openTranslationSockets(callerId, calleeId);
+
+          // ✅ Start caller → callee translation
+          await startCallerStreaming();
+
+          // ✅ Start callee → caller translation
+          await startCalleeStreaming();
+
+
+          //setInterval(() => startRecording(), 5000);
 
           setTimeout(() => {
             if (recorder && recorder.state === "recording") {
@@ -695,6 +871,13 @@
               console.log("🛑 Recording stopped.");
             }
           }, 5000);
+
+          //Added for both way communication
+          openTranslationSockets(callerId, calleeId); // 🔌 both directions
+          await startCallerStreaming();               // 🎙️ caller → callee
+          await startCalleeStreaming();               // 🎙️ callee → caller
+          //Added for both way communication
+
         } catch (err) {
           console.error("Pickup failed:", err);
         }
@@ -800,6 +983,32 @@
 
       function stopCall() {
         console.log("Stopping call..."); // Stop translation loop 
+        //Added for both way communication        
+        // ✅ Stop caller stream
+        if (callerRecorder && callerRecorder.state !== "inactive") {
+          callerRecorder.stop();
+        }
+        if (callerStream) {
+          callerStream.getTracks().forEach(track => track.stop());
+        }
+
+        // ✅ Stop callee stream
+        if (calleeRecorder && calleeRecorder.state !== "inactive") {
+          calleeRecorder.stop();
+        }
+        if (calleeStream) {
+          calleeStream.getTracks().forEach(track => track.stop());
+        }
+
+        // ✅ Close WebSocket connections
+        if (callerSocket && callerSocket.readyState === WebSocket.OPEN) {
+          callerSocket.close();
+        }
+        if (calleeSocket && calleeSocket.readyState === WebSocket.OPEN) {
+          calleeSocket.close();
+        }
+        //Added for both way communication
+
         isTranslationSessionActive = false;
 
         const modalInstance = bootstrap.Modal.getInstance(modalEl);
@@ -833,6 +1042,18 @@
 
         const remoteAudio = document.getElementById("remoteAudio");
         if (remoteAudio) remoteAudio.srcObject = null;
+
+
+
+        // if (callerSocket) callerSocket.close();
+        // if (calleeSocket) calleeSocket.close();
+
+        // if (callerRecorder) callerRecorder.stop();
+        // if (calleeRecorder) calleeRecorder.stop();
+
+        // if (callerStream) callerStream.getTracks().forEach(t => t.stop());
+        // if (calleeStream) calleeStream.getTracks().forEach(t => t.stop());
+        //Added for both way communication
 
       }
 

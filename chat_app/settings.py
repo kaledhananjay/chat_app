@@ -33,7 +33,15 @@ SECRET_KEY = 'django-insecure-9z8r)_b61wi^h-#jw-_nov%nu$gzvno(x8(oclyy35&r=candj
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*'] 
+ALLOWED_HOSTS = [
+    'chatapplocal',
+    '127.0.0.1',
+    'localhost',
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    'https://chatapplocal',
+]
 
 
 # Application definition
