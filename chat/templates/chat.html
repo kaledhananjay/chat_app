@@ -427,9 +427,15 @@
 
         callerSocket.onmessage = e => {
           const data = JSON.parse(e.data);
-          const audio = new Audio(data.audio_url);
-          console.log("🎧 Caller Received audio URL:", data.audio_url);
-          audio.play(); // 🔊 Caller hears callee
+          if (data.sender === "server" && data.target === "caller") {
+            const blob = base64ToBlob(data.chunk, data.mimeType);
+            playAudioBlob(blob);
+          }
+
+
+          // const audio = new Audio(data.audio_url);
+          // console.log("🎧 Caller Received audio URL:", data.audio_url);
+          // audio.play(); // 🔊 Caller hears callee
         };
       }
 
